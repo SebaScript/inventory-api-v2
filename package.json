@@ -21,7 +21,7 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:unit": "jest --selectProjects unit",
+    "test:unit": "cross-env SKIP_DB=true jest --selectProjects unit",
     "test:integration": "jest --selectProjects integration --runInBand",
     "test:e2e": "jest --selectProjects e2e --runInBand",
     "test:cov": "jest --coverage --runInBand",
@@ -31,7 +31,8 @@
     "migration:show": "typeorm-ts-node-commonjs migration:show -d src/database/data-source.ts",
     "migration:run:prod": "typeorm migration:run -d dist/database/data-source.js",
     "seed": "ts-node src/database/seeds/run-seed.ts",
-    "seed:prod": "node dist/database/seeds/run-seed.js"
+    "seed:prod": "node dist/database/seeds/run-seed.js",
+    "test:cov:unit": "cross-env SKIP_DB=true jest --selectProjects unit --coverage"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.1",
@@ -59,6 +60,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^24.6.0",
     "@types/supertest": "^6.0.3",
+    "cross-env": "^10.1.0",
     "embedded-postgres": "18.4.0-beta.17",
     "eslint": "^9.36.0",
     "eslint-config-prettier": "^10.1.8",
