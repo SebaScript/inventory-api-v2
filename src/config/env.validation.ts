@@ -49,7 +49,5 @@ export const envValidationSchema = Joi.object({
   /** Comma-separated list of allowed origins, or `*`. */
   CORS_ORIGIN: Joi.string().default('*'),
 
-  LOG_LEVEL: Joi.string()
-    .valid('error', 'warn', 'log', 'debug', 'verbose')
-    .default('log'),
+  LOG_LEVEL: Joi.string().valid('error', 'warn', 'log', 'debug', 'verbose').default('log'),
 });
