@@ -24,7 +24,17 @@
     "noUnusedParameters": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "types": ["node", "jest"]
+    "isolatedModules": true,
+    "types": ["node", "jest"],
+    "paths": {
+      // `embedded-postgres` is a pure-ESM package that ships only an `exports`
+      // field, so classic Node resolution cannot find its declarations. This
+      // maps the specifier straight at the real .d.ts it publishes.
+      //
+      // Type-only: the emitted `require('embedded-postgres')` is untouched, and
+      // Node's require(ESM) interop resolves it correctly at runtime.
+      "embedded-postgres": ["./node_modules/embedded-postgres/dist/index.d.ts"]
+    }
   },
   "include": ["src/**/*", "test/**/*", "jest.config.ts"],
   "exclude": ["node_modules", "dist", "coverage"]
