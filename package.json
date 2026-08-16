@@ -32,7 +32,13 @@
     "migration:run:prod": "typeorm migration:run -d dist/database/data-source.js",
     "seed": "ts-node src/database/seeds/run-seed.ts",
     "seed:prod": "node dist/database/seeds/run-seed.js",
-    "test:cov:unit": "cross-env SKIP_DB=true jest --selectProjects unit --coverage"
+    "test:cov:unit": "cross-env SKIP_DB=true jest --selectProjects unit --coverage",
+    "docker:dev": "docker compose up --build",
+    "docker:dev:down": "docker compose down -v",
+    "docker:test": "docker compose --env-file .env.test -f docker-compose.test.yml up --build",
+    "docker:test:down": "docker compose --env-file .env.test -f docker-compose.test.yml down -v",
+    "docker:prod": "docker compose --env-file .env.production -f docker-compose.prod.yml up --build -d",
+    "docker:prod:down": "docker compose --env-file .env.production -f docker-compose.prod.yml down -v"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.1",
