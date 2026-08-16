@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module';
 import { GlobalExceptionFilter } from '../../src/common/filters/global-exception.filter';
 import { clearInventory } from '../../src/database/seeds/seed';
+import { setupSwagger } from '../../src/swagger';
 import { type TestServer } from './http-query';
 
 export interface TestApp {
@@ -20,7 +21,17 @@ export interface TestApp {
  * validation rule or an error shape that only holds in production is not
  * actually tested. Keeping them in step is the point of this factory.
  */
-export const createTestApp = async (): Promise<TestApp> => {
+export interface CreateTestAppOptions {
+  /**
+   * Mounts the OpenAPI document at `/docs`.
+   *
+   * Off by default because it costs a full document build on every boot, and
+   * only the documentation spec needs it.
+   */
+  withSwagger?: boolean;
+}
+
+export const createTestApp = async (options: CreateTestAppOptions = {}): Promise<TestApp> => {
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
@@ -37,6 +48,10 @@ export const createTestApp = async (): Promise<TestApp> => {
   );
   // `false` = non-production, so failures surface with their stack during tests.
   app.useGlobalFilters(new GlobalExceptionFilter(false));
+
+  // Swagger has to be mounted before init, exactly as in `main.ts`, or its
+  // routes never reach the HTTP adapter.
+  if (options.withSwagger) setupSwagger(app);
 
   await app.init();
 
