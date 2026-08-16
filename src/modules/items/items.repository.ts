@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { type EntityManager, Repository, type SelectQueryBuilder } from 'typeorm';
+import { Repository, type SelectQueryBuilder } from 'typeorm';
 import { SortOrder } from '../../common/dto/pagination-query.dto';
 import { type PaginatedRows } from '../groups/groups.repository';
 import { ItemSortField, type QueryItemsDto } from './dto/query-items.dto';
@@ -33,16 +33,17 @@ export class ItemsRepository {
     private readonly repository: Repository<Item>,
   ) {}
 
-  create(data: Partial<Item>, manager?: EntityManager): Promise<Item> {
-    const repo = manager ? manager.getRepository(Item) : this.repository;
-    return repo.save(repo.create(data));
-  }
-
-  findById(id: number, withGroup = false): Promise<Item | null> {
-    return this.repository.findOne({
-      where: { id },
-      relations: withGroup ? { group: true } : {},
-    });
+  /**
+   * Items are always read with their group attached: every endpoint that
+   * returns a single item includes it, so making it optional would only add a
+   * branch nobody takes.
+   *
+   * Note there is no `create` here. Item creation happens inside the
+   * transaction that also writes the opening movement, so it goes through the
+   * transaction's EntityManager in `ItemsService` rather than this repository.
+   */
+  findById(id: number): Promise<Item | null> {
+    return this.repository.findOne({ where: { id }, relations: { group: true } });
   }
 
   findBySku(sku: string, excludeId?: number): Promise<Item | null> {
@@ -140,7 +141,13 @@ export class ItemsRepository {
       // Matches the partial index idx_items_low_stock.
       .where('item.quantity <= item.minimumStock')
       // Most urgent first: the largest shortfall relative to the threshold.
-      .orderBy('item.quantity - item.minimumStock', 'ASC')
+      //
+      // The shortfall is selected under an alias rather than written inline in
+      // ORDER BY. Combining a join with skip/take makes TypeORM wrap the query
+      // in a DISTINCT subquery, and a bare arithmetic expression does not
+      // survive that rewrite — it gets quoted as if it were a column name.
+      .addSelect('item.quantity - item.minimum_stock', 'shortfall')
+      .orderBy('shortfall', 'ASC')
       .addOrderBy('item.id', 'ASC')
       .skip((page - 1) * pageSize)
       .take(pageSize)
@@ -151,16 +158,12 @@ export class ItemsRepository {
 
   async update(id: number, data: Partial<Item>): Promise<Item | null> {
     await this.repository.update({ id }, data);
-    return this.findById(id, true);
+    return this.findById(id);
   }
 
   async delete(id: number): Promise<boolean> {
     const result = await this.repository.delete({ id });
     return (result.affected ?? 0) > 0;
-  }
-
-  countByGroup(groupId: number): Promise<number> {
-    return this.repository.countBy({ groupId });
   }
 
   /** Whole-inventory aggregates, computed in the database in a single pass. */

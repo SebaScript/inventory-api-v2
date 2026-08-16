@@ -80,7 +80,7 @@ export class ItemsService {
   }
 
   async findOne(id: number): Promise<Item> {
-    const item = await this.itemsRepository.findById(id, true);
+    const item = await this.itemsRepository.findById(id);
     if (!item) throw new ItemNotFoundError(id);
     return item;
   }
