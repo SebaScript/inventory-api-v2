@@ -86,6 +86,20 @@ On top of that, a `CHECK (quantity >= 0)` constraint in PostgreSQL is the last l
 | Container          | Docker multi-stage + Compose    | Reproducible on any machine that has Docker.                                                 |
 | CI/CD              | GitHub Actions                  | Two independent pipelines with enforced quality gates.                                       |
 
+### Dependency overrides
+
+`package.json` carries one `overrides` entry, and it exists for a reason worth stating since JSON cannot hold a comment:
+
+```jsonc
+"overrides": { "@nestjs/swagger": { "js-yaml": "^5.3.0" } }
+```
+
+`@nestjs/swagger@11.4.6` pins `js-yaml` at exactly `5.2.1`, which carries a high-severity denial-of-service advisory ([GHSA-pm4m-ph32-ghv5](https://github.com/advisories/GHSA-pm4m-ph32-ghv5)) fixed in `5.3.0`. No stable `@nestjs/swagger` release bumps it yet, so the transitive dependency is forced forward.
+
+The override is **scoped to `@nestjs/swagger` deliberately**: ESLint and the Nest CLI use the unaffected `js-yaml` v4 line, and a blanket override would drag them across a major version for no benefit.
+
+The Production Pipeline runs `npm audit --omit=dev --audit-level=high` and refuses to deploy if it fails — which is exactly how this advisory was found.
+
 ### Why TypeORM
 
 The data-access layer was a deliberate choice, weighed against Prisma and Drizzle:
