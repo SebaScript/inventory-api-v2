@@ -1,0 +1,20 @@
+# Normalise line endings for everyone, regardless of platform or of how each
+# contributor happens to have core.autocrlf configured.
+#
+# Without this, a Windows clone rewrites every checked-out file to CRLF, and the
+# first commit from that machine can flip whole files to CRLF in the repository —
+# which then fails `prettier --check` and the shell scripts in CI.
+* text=auto eol=lf
+
+# Shell scripts and the container entrypoint MUST be LF: a CRLF shebang line
+# makes the kernel fail with "bad interpreter".
+*.sh text eol=lf
+docker/entrypoint.sh text eol=lf
+
+# Binary files must never be touched.
+*.png binary
+*.jpg binary
+*.ico binary
+
+# Keep the lockfile out of diffs and language statistics; it is generated.
+package-lock.json -diff linguist-generated=true
