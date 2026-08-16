@@ -24,7 +24,15 @@
     "noUnusedParameters": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "isolatedModules": true,
+    // Deliberately NOT using isolatedModules. It makes TypeScript emit
+    // defensive `typeof X !== "undefined"` guards inside every decorator's
+    // design:paramtypes metadata, which the coverage instrumenter counts as
+    // real, permanently-uncovered branches — dozens of phantom misses per
+    // controller. The discipline it would enforce (explicit `import type`) is
+    // already enforced by the @typescript-eslint/consistent-type-imports rule.
+    //
+    // Decorator helpers come from tslib rather than being inlined in every file.
+    "importHelpers": true,
     "types": ["node", "jest"],
     "paths": {
       // `embedded-postgres` is a pure-ESM package that ships only an `exports`

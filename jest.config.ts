@@ -51,15 +51,18 @@ const config: Config = {
 
   collectCoverageFrom: [
     'src/**/*.ts',
-    // Bootstrap wiring: exercised by starting the process, not by a unit test.
+    // Test files are not production code.
+    '!src/**/*.spec.ts',
+    // Process entry points: they wire up and call `listen`/`exit`, which is
+    // exercised by actually starting the app, not by a unit test.
     '!src/main.ts',
+    '!src/database/seeds/run-seed.ts',
     // Nest modules are declarative wiring with no branches to cover; they are
     // validated implicitly because the E2E suite fails to boot if they are wrong.
     '!src/**/*.module.ts',
     // Migrations are verified by every integration test: none of them could run
     // without the schema these produce.
     '!src/database/migrations/**',
-    '!src/**/index.ts',
   ],
   coverageDirectory: '<rootDir>/coverage',
   coverageReporters: ['text-summary', 'lcov', 'json-summary', 'html'],
