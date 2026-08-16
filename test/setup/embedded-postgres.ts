@@ -54,5 +54,21 @@ export const stopEmbeddedPostgres = async (): Promise<void> => {
   if (!instance) return;
   await instance.stop();
   instance = undefined;
-  rmSync(DATA_DIR, { recursive: true, force: true });
+  removeDataDir();
+};
+
+/**
+ * Deletes the data directory, tolerating Windows file locking.
+ *
+ * Windows can keep handles on the data files for a moment after the postmaster
+ * exits, so an immediate delete throws EBUSY. A leftover directory is harmless
+ * — the next run wipes it before initialising — so failing the whole test run
+ * over cleanup would be the wrong trade.
+ */
+const removeDataDir = (): void => {
+  try {
+    rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch {
+    // Left for the next run's clean slate.
+  }
 };
