@@ -7,8 +7,9 @@ import { Movement } from '../modules/movements/entities/movement.entity';
 
 // The TypeORM CLI boots this file directly, outside the Nest application, so it
 // has to load the .env file itself. Inside Nest, ConfigModule has already done
-// it and this call is a harmless no-op.
-loadDotEnv();
+// it and this call is a harmless no-op. `quiet` suppresses dotenv's startup
+// banner, which would otherwise pollute test output and container logs.
+loadDotEnv({ quiet: true });
 
 /**
  * Builds the TypeORM options used by *both* the Nest application and the
