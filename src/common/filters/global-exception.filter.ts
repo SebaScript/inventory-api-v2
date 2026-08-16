@@ -65,6 +65,25 @@ interface PostgresDriverError {
 const isQueryFailedError = (error: unknown): error is QueryFailedError<Error> =>
   error instanceof QueryFailedError;
 
+/**
+ * Recognises the `ServiceUnavailableException` Terminus throws when a health
+ * indicator fails.
+ *
+ * Detected by the payload's shape rather than by the request path, so it keeps
+ * working if the health route is ever mounted somewhere else.
+ */
+const isHealthCheckException = (error: unknown): error is HttpException => {
+  if (!(error instanceof HttpException)) return false;
+  const payload = error.getResponse();
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'status' in payload &&
+    'details' in payload &&
+    'info' in payload
+  );
+};
+
 const REASON_PHRASES: Readonly<Record<number, string>> = {
   400: 'Bad Request',
   401: 'Unauthorized',
@@ -103,6 +122,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
     const requestId = randomUUID();
+
+    // The health endpoint has its own well-known contract that monitoring
+    // tools parse; reshaping it into the generic error envelope would break
+    // them for no benefit.
+    if (isHealthCheckException(exception)) {
+      this.log(exception, exception.getStatus(), requestId, request);
+      response.status(exception.getStatus()).json(exception.getResponse());
+      return;
+    }
 
     const resolved = this.resolve(exception);
 
