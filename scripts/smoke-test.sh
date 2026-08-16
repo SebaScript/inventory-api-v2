@@ -80,12 +80,24 @@ expect_status 200 GET /docs > /dev/null
 expect_status 200 GET /docs-json > /dev/null
 pass "Swagger UI and OpenAPI document are served"
 
-# --- Seed -------------------------------------------------------------------
-echo "[3/8] Demo data"
+# --- Inventory summary ------------------------------------------------------
+#
+# Whether demo data is present is environment-specific: Test seeds itself,
+# Production must not. So the shape of the report is always asserted, and the
+# presence of seeded rows only when the caller says to expect it.
+echo "[3/8] Inventory summary"
 summary=$(expect_status 200 GET /items/summary)
+for field in totalGroups totalItems totalUnits totalValue lowStockCount outOfStockCount; do
+  echo "$summary" | json_field "$field" > /dev/null || fail "summary is missing ${field}"
+done
 total_items=$(echo "$summary" | json_field totalItems)
-[ "$total_items" -gt 0 ] || fail "seed produced no items"
-pass "inventory contains ${total_items} seeded items"
+
+if [ "${EXPECT_SEED_DATA:-false}" = "true" ]; then
+  [ "$total_items" -gt 0 ] || fail "expected seeded demo data, found none"
+  pass "summary is well formed and reports ${total_items} seeded items"
+else
+  pass "summary is well formed (${total_items} items; seeding not expected here)"
+fi
 
 # --- Group CRUD -------------------------------------------------------------
 echo "[4/8] Group CRUD"

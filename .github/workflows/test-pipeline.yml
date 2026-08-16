@@ -173,6 +173,9 @@ jobs:
 
       - name: Smoke test the running API
         run: bash scripts/smoke-test.sh http://localhost:3100
+        env:
+          # The Test stack seeds itself, so the demo dataset must be there.
+          EXPECT_SEED_DATA: 'true'
 
       - name: Dump container logs on failure
         if: failure()

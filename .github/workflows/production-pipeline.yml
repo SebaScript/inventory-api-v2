@@ -179,7 +179,8 @@ jobs:
 
       - name: Smoke test the running API
         # Same script as the Test pipeline, so both environments are proven
-        # against an identical contract.
+        # against an identical contract. EXPECT_SEED_DATA stays unset here:
+        # production starts empty by design, which the previous step asserts.
         run: bash scripts/smoke-test.sh http://localhost:3200
 
       - name: Verify stack traces are not exposed
