@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "sourceMap": false,
+    "incremental": false
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage",
+    "test",
+    "jest.config.ts",
+    "**/*.spec.ts",
+    "**/*.int-spec.ts",
+    "**/*.e2e-spec.ts"
+  ]
+}

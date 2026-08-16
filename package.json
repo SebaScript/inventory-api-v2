@@ -21,7 +21,7 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:unit": "jest --selectProjects unit",
+    "test:unit": "cross-env SKIP_DB=true jest --selectProjects unit",
     "test:integration": "jest --selectProjects integration --runInBand",
     "test:e2e": "jest --selectProjects e2e --runInBand",
     "test:cov": "jest --coverage --runInBand",
@@ -31,7 +31,14 @@
     "migration:show": "typeorm-ts-node-commonjs migration:show -d src/database/data-source.ts",
     "migration:run:prod": "typeorm migration:run -d dist/database/data-source.js",
     "seed": "ts-node src/database/seeds/run-seed.ts",
-    "seed:prod": "node dist/database/seeds/run-seed.js"
+    "seed:prod": "node dist/database/seeds/run-seed.js",
+    "test:cov:unit": "cross-env SKIP_DB=true jest --selectProjects unit --coverage",
+    "docker:dev": "docker compose up --build",
+    "docker:dev:down": "docker compose down -v",
+    "docker:test": "docker compose --env-file .env.test -f docker-compose.test.yml up --build",
+    "docker:test:down": "docker compose --env-file .env.test -f docker-compose.test.yml down -v",
+    "docker:prod": "docker compose --env-file .env.production -f docker-compose.prod.yml up --build -d",
+    "docker:prod:down": "docker compose --env-file .env.production -f docker-compose.prod.yml down -v"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.1",
@@ -43,10 +50,12 @@
     "@nestjs/typeorm": "^11.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
+    "dotenv": "^17.2.3",
     "joi": "^17.13.3",
     "pg": "^8.16.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "tslib": "^2.8.1",
     "typeorm": "^1.1.0"
   },
   "devDependencies": {
@@ -58,6 +67,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^24.6.0",
     "@types/supertest": "^6.0.3",
+    "cross-env": "^10.1.0",
     "embedded-postgres": "18.4.0-beta.17",
     "eslint": "^9.36.0",
     "eslint-config-prettier": "^10.1.8",

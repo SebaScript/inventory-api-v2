@@ -1,0 +1,103 @@
+# ---------------------------------------------------------------------------
+# PRODUCTION environment — shares nothing with Test.
+#
+#   cp .env.production.example .env.production   # then set real secrets
+#   npm run docker:prod
+#
+# The npm script expands to:
+#
+#   docker compose --env-file .env.production -f docker-compose.prod.yml up --build -d
+#
+# `--env-file` is required so ${VAR} substitution reads .env.production rather
+# than defaulting to `.env`; see the note in docker-compose.test.yml.
+#
+#   API      http://localhost:3200
+#   Swagger  http://localhost:3200/docs
+#   Health   http://localhost:3200/health
+#
+# Differences from Test, beyond the separate database and credentials:
+#   - SEED_ON_START is false, and the application refuses to seed in production
+#     even if it were set — demo data must never reach real inventory
+#   - error responses never carry stack traces
+#   - the database port is NOT published to the host
+#   - resource limits and log rotation are configured
+#
+# The postgres service here is what a self-contained deployment looks like. When
+# moving to a managed database, delete this service and point DATABASE_URL at
+# the provider instead; nothing else changes.
+# ---------------------------------------------------------------------------
+name: inventory-prod
+
+services:
+  postgres-prod:
+    image: postgres:18-alpine
+    container_name: inventory-prod-postgres
+    restart: always
+    env_file: .env.production
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # No `ports` mapping: the database is reachable only from the API container
+    # on the internal network, never from the host or the outside world.
+    expose:
+      - '5432'
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -q']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
+    networks: [inventory-prod]
+
+  api-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: inventory-api:prod
+    container_name: inventory-prod-api
+    restart: always
+    depends_on:
+      postgres-prod:
+        condition: service_healthy
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-prod:5432/${POSTGRES_DB}
+      # Applied on boot so a deployment can never serve traffic against an
+      # outdated schema.
+      RUN_MIGRATIONS_ON_START: 'true'
+      # Demo data must never be injected into production.
+      SEED_ON_START: 'false'
+      LOG_LEVEL: ${LOG_LEVEL:-warn}
+    ports:
+      - '${API_PORT:-3200}:3000'
+    healthcheck:
+      test: ['CMD', 'node', 'docker/healthcheck.js']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: '1.0', memory: 512M }
+        reservations: { cpus: '0.25', memory: 128M }
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '5' }
+    networks: [inventory-prod]
+
+volumes:
+  pgdata_prod:
+    name: inventory_prod_pgdata
+
+networks:
+  inventory-prod:
+    name: inventory_prod_network
+    driver: bridge

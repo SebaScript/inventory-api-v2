@@ -1,0 +1,90 @@
+# ---------------------------------------------------------------------------
+# TEST environment — fully independent from Production.
+#
+#   cp .env.test.example .env.test        # then set a real password
+#   npm run docker:test
+#
+# The npm script expands to:
+#
+#   docker compose --env-file .env.test -f docker-compose.test.yml up --build
+#
+# `--env-file` is required, not cosmetic: `env_file:` inside a service only
+# injects variables into the container, while ${VAR} substitution in this file
+# is performed by Compose itself and defaults to reading `.env`. Without the
+# flag this stack would silently pick up the development credentials.
+#
+#   API      http://localhost:3100
+#   Swagger  http://localhost:3100/docs
+#   Health   http://localhost:3100/health
+#
+# Independence is structural, not a convention:
+#   - its own compose project name, so Docker treats it as a separate stack
+#   - its own PostgreSQL container and its own named volume
+#   - its own network
+#   - its own credentials, read from .env.test (never committed)
+#   - its own host port
+#
+# All three stacks can run at the same time without colliding, and this one has
+# no way to reach the production database.
+# ---------------------------------------------------------------------------
+name: inventory-test
+
+services:
+  postgres-test:
+    image: postgres:18-alpine
+    container_name: inventory-test-postgres
+    restart: unless-stopped
+    env_file: .env.test
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - '${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      - pgdata_test:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -q']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks: [inventory-test]
+
+  api-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inventory-test-api
+    restart: unless-stopped
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    env_file: .env.test
+    environment:
+      NODE_ENV: test
+      PORT: 3000
+      # Built from the same credentials the database container uses, so the two
+      # can never drift apart.
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-test:5432/${POSTGRES_DB}
+      RUN_MIGRATIONS_ON_START: 'true'
+      # Demo data is wanted here: this environment doubles as the QA target.
+      SEED_ON_START: 'true'
+    ports:
+      - '${API_PORT:-3100}:3000'
+    healthcheck:
+      test: ['CMD', 'node', 'docker/healthcheck.js']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [inventory-test]
+
+volumes:
+  pgdata_test:
+    name: inventory_test_pgdata
+
+networks:
+  inventory-test:
+    name: inventory_test_network
+    driver: bridge

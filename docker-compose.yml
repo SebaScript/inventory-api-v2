@@ -1,0 +1,85 @@
+# ---------------------------------------------------------------------------
+# Local development / demo stack.
+#
+#   docker compose up --build
+#
+# Brings up PostgreSQL and the API on a clean machine with nothing installed but
+# Docker. The schema is migrated and demo data seeded automatically on first
+# boot, so the API is immediately usable:
+#
+#   API      http://localhost:3000
+#   Swagger  http://localhost:3000/docs
+#   Health   http://localhost:3000/health
+#
+# Full reset:  docker compose down -v && docker compose up --build
+#
+# Values below are development defaults, deliberately inline so the stack works
+# with no .env file at all. The Test and Production stacks read their
+# credentials from uncommitted env files instead.
+# ---------------------------------------------------------------------------
+name: inventory-dev
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: inventory-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-inventory}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inventory_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-inventory_dev}
+    ports:
+      # Exposed so a local psql or GUI client can inspect the demo data.
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` alone reports true while the server is still running its
+      # bootstrap scripts; a real query is what proves it can serve traffic.
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-inventory} -d ${POSTGRES_DB:-inventory_dev} -q']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks: [inventory]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inventory-dev-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        # The API never starts against a database that is not ready.
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-inventory}:${POSTGRES_PASSWORD:-inventory_dev_password}@postgres:5432/${POSTGRES_DB:-inventory_dev}
+      DB_SSL: 'false'
+      DB_LOGGING: ${DB_LOGGING:-false}
+      DB_POOL_SIZE: '10'
+      RUN_MIGRATIONS_ON_START: 'true'
+      SEED_ON_START: 'true'
+      SWAGGER_ENABLED: 'true'
+      CORS_ORIGIN: '*'
+      LOG_LEVEL: log
+    ports:
+      - '${API_PORT:-3000}:3000'
+    healthcheck:
+      test: ['CMD', 'node', 'docker/healthcheck.js']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [inventory]
+
+volumes:
+  pgdata:
+    name: inventory_dev_pgdata
+
+networks:
+  inventory:
+    name: inventory_dev_network
+    driver: bridge
