@@ -713,7 +713,7 @@ Database errors are translated rather than leaked: `23505` → `409`, `23503` �
 
 ## Testing
 
-352 tests across three layers, run together in a single command with one merged coverage report.
+357 tests across three layers, run together in a single command with one merged coverage report.
 
 ```bash
 npm test                  # everything
@@ -725,7 +725,7 @@ npm run test:cov          # with the coverage gate
 
 **No PostgreSQL installation is required.** `test/setup/global-setup.ts` uses `DATABASE_URL` when one is set (CI, Docker) and otherwise boots an ephemeral PostgreSQL through `embedded-postgres`. The schema is created by running the **real migrations**, so tests exercise the exact schema production runs on.
 
-### Unit — 183 tests
+### Unit — 188 tests
 
 Inventory arithmetic (extracted as a pure function and tested exhaustively), all three services with mocked repositories, domain errors, DTO validation, environment parsing, seed guards, and every branch of the exception filter.
 
@@ -750,8 +750,8 @@ Group CRUD, Item CRUD, `IN`, `OUT`, insufficient stock, validation across body/p
 | ---------- | ---------- | --------- | --------------- |
 | Lines      | **100%**   | 60%       | 85%             |
 | Functions  | **100%**   | 60%       | 85%             |
-| Statements | **99.65%** | 60%       | 85%             |
-| Branches   | **94.01%** | 60%       | 85%             |
+| Statements | **100%**   | 60%       | 85%             |
+| Branches   | **95.68%** | 60%       | 85%             |
 
 The gate is Jest itself:
 
