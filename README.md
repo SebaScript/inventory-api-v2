@@ -5,8 +5,8 @@ A production-grade RESTful inventory management API built with **NestJS**, **Typ
 The domain is three entities — **Group → Item → Movement** — with strict transactional stock rules: an item's quantity is always exactly the sum of its movement ledger, and it can never go negative, not even under concurrent load.
 
 ```bash
-git clone https://github.com/SebaScript/inventory-api.git
-cd inventory-api
+git clone https://github.com/SebaScript/inventory-api-v2.git
+cd inventory-api-v2
 docker compose up --build
 ```
 
@@ -210,8 +210,8 @@ inventory-api/
 ## Quick start
 
 ```bash
-git clone https://github.com/SebaScript/inventory-api.git
-cd inventory-api
+git clone https://github.com/SebaScript/inventory-api-v2.git
+cd inventory-api-v2
 docker compose up --build
 ```
 
@@ -801,7 +801,7 @@ Start PostgreSQL service → Run tests → Coverage ≥ 60%
    ↓
 docker compose up --build (Test stack) → wait for health → smoke test
    ↓
-Deploy Test → publish ghcr.io/SebaScript/inventory-api:test
+Deploy Test → publish ghcr.io/SebaScript/inventory-api-v2:test
 ```
 
 ### Production Pipeline — `main`
@@ -814,7 +814,7 @@ Start PostgreSQL service → Run tests → Coverage ≥ 85%
 docker compose up --build (Production stack) → verify healthy AND unseeded
    → smoke test → assert no stack traces in responses
    ↓
-Deploy Production → publish ghcr.io/SebaScript/inventory-api:prod, :latest, :sha
+Deploy Production → publish ghcr.io/SebaScript/inventory-api-v2:prod, :latest, :sha
 ```
 
 ### What makes the gates real
@@ -841,7 +841,7 @@ Fully independent from Production — the separation is structural, not a conven
 | Secrets     | GitHub environment `test` (`TEST_DB_PASSWORD`)            |
 | Seeding     | Enabled — this environment doubles as the QA/demo target  |
 | Deployment  | Its own pipeline, triggered by `develop`                  |
-| Image       | `ghcr.io/SebaScript/inventory-api:test`                   |
+| Image       | `ghcr.io/SebaScript/inventory-api-v2:test`                   |
 
 ```bash
 cp .env.test.example .env.test   # set a real password
@@ -865,7 +865,7 @@ It has no route to the production database: a separate Docker network, separate 
 | Secrets     | GitHub environment `production` (`PRODUCTION_DB_PASSWORD`) |
 | Seeding     | **Disabled**, and refused by the application even if set   |
 | Deployment  | Its own pipeline, triggered by `main`                      |
-| Image       | `ghcr.io/SebaScript/inventory-api:prod`                    |
+| Image       | `ghcr.io/SebaScript/inventory-api-v2:prod`                    |
 
 Additional hardening beyond Test:
 
@@ -888,8 +888,8 @@ npm run docker:prod
 The deliverable of each pipeline is an **immutable, versioned Docker image** published to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/sebascript/inventory-api:prod
-docker run -p 3000:3000 -e DATABASE_URL=postgres://... ghcr.io/sebascript/inventory-api:prod
+docker pull ghcr.io/sebascript/inventory-api-v2:prod
+docker run -p 3000:3000 -e DATABASE_URL=postgres://... ghcr.io/sebascript/inventory-api-v2:prod
 ```
 
 Images are tagged `:test` / `:test-<sha>` and `:prod` / `:latest` / `:<sha>`. Publishing uses the built-in `GITHUB_TOKEN` and requires no credentials from anyone, so this part of the pipeline works out of the box.
