@@ -32,10 +32,14 @@ services:
       # Exposed so a local psql or GUI client can inspect the demo data.
       - '${POSTGRES_PORT:-5432}:5432'
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # PostgreSQL 18+ images store data in a major-version-specific
+      # subdirectory, so the mount goes at /var/lib/postgresql rather than
+      # /var/lib/postgresql/data. Mounting the old path makes the container
+      # refuse to start. See docker-library/postgres#1259.
+      - pgdata:/var/lib/postgresql
     healthcheck:
-      # `pg_isready` alone reports true while the server is still running its
-      # bootstrap scripts; a real query is what proves it can serve traffic.
+      # Checks the specific database, not just the server: during bootstrap the
+      # postmaster answers before the application database exists.
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-inventory} -d ${POSTGRES_DB:-inventory_dev} -q']
       interval: 5s
       timeout: 5s

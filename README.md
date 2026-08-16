@@ -86,6 +86,20 @@ On top of that, a `CHECK (quantity >= 0)` constraint in PostgreSQL is the last l
 | Container          | Docker multi-stage + Compose    | Reproducible on any machine that has Docker.                                                 |
 | CI/CD              | GitHub Actions                  | Two independent pipelines with enforced quality gates.                                       |
 
+### Dependency overrides
+
+`package.json` carries one `overrides` entry, and it exists for a reason worth stating since JSON cannot hold a comment:
+
+```jsonc
+"overrides": { "@nestjs/swagger": { "js-yaml": "^5.3.0" } }
+```
+
+`@nestjs/swagger@11.4.6` pins `js-yaml` at exactly `5.2.1`, which carries a high-severity denial-of-service advisory ([GHSA-pm4m-ph32-ghv5](https://github.com/advisories/GHSA-pm4m-ph32-ghv5)) fixed in `5.3.0`. No stable `@nestjs/swagger` release bumps it yet, so the transitive dependency is forced forward.
+
+The override is **scoped to `@nestjs/swagger` deliberately**: ESLint and the Nest CLI use the unaffected `js-yaml` v4 line, and a blanket override would drag them across a major version for no benefit.
+
+The Production Pipeline runs `npm audit --omit=dev --audit-level=high` and refuses to deploy if it fails — which is exactly how this advisory was found.
+
 ### Why TypeORM
 
 The data-access layer was a deliberate choice, weighed against Prisma and Drizzle:
@@ -713,7 +727,7 @@ Database errors are translated rather than leaked: `23505` → `409`, `23503` �
 
 ## Testing
 
-352 tests across three layers, run together in a single command with one merged coverage report.
+357 tests across three layers, run together in a single command with one merged coverage report.
 
 ```bash
 npm test                  # everything
@@ -725,7 +739,7 @@ npm run test:cov          # with the coverage gate
 
 **No PostgreSQL installation is required.** `test/setup/global-setup.ts` uses `DATABASE_URL` when one is set (CI, Docker) and otherwise boots an ephemeral PostgreSQL through `embedded-postgres`. The schema is created by running the **real migrations**, so tests exercise the exact schema production runs on.
 
-### Unit — 183 tests
+### Unit — 188 tests
 
 Inventory arithmetic (extracted as a pure function and tested exhaustively), all three services with mocked repositories, domain errors, DTO validation, environment parsing, seed guards, and every branch of the exception filter.
 
@@ -750,8 +764,8 @@ Group CRUD, Item CRUD, `IN`, `OUT`, insufficient stock, validation across body/p
 | ---------- | ---------- | --------- | --------------- |
 | Lines      | **100%**   | 60%       | 85%             |
 | Functions  | **100%**   | 60%       | 85%             |
-| Statements | **99.65%** | 60%       | 85%             |
-| Branches   | **94.01%** | 60%       | 85%             |
+| Statements | **100%**   | 60%       | 85%             |
+| Branches   | **95.68%** | 60%       | 85%             |
 
 The gate is Jest itself:
 

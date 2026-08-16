@@ -18,7 +18,13 @@ interface RawGroupSummary {
   lowStockCount: string;
 }
 
-interface RawGlobalSummary {
+/**
+ * Whole-inventory aggregates as PostgreSQL returns them.
+ *
+ * `COUNT` and `SUM` come back as strings because their SQL types can exceed
+ * what a JS number holds; the service coerces them once, at the boundary.
+ */
+export interface RawGlobalSummary {
   totalItems: string;
   totalUnits: string | null;
   totalValue: string | null;
@@ -167,7 +173,7 @@ export class ItemsRepository {
   }
 
   /** Whole-inventory aggregates, computed in the database in a single pass. */
-  async globalSummary(): Promise<Omit<RawGlobalSummary, never>> {
+  async globalSummary(): Promise<RawGlobalSummary> {
     const raw = await this.repository
       .createQueryBuilder('item')
       .select('COUNT(item.id)', 'totalItems')

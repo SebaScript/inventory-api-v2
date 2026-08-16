@@ -179,7 +179,8 @@ jobs:
 
       - name: Smoke test the running API
         # Same script as the Test pipeline, so both environments are proven
-        # against an identical contract.
+        # against an identical contract. EXPECT_SEED_DATA stays unset here:
+        # production starts empty by design, which the previous step asserts.
         run: bash scripts/smoke-test.sh http://localhost:3200
 
       - name: Verify stack traces are not exposed
@@ -217,6 +218,12 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: Compute the image name
+        # Docker registry repository names must be lowercase, and
+        # github.repository preserves the owner's casing. Deriving it here keeps
+        # the tags correct if the repository is ever renamed, moved or forked.
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - name: Authenticate to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -233,9 +240,9 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:prod
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ${{ env.IMAGE }}:prod
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -244,7 +251,7 @@ jobs:
           {
             echo "## Production deployment"
             echo
-            echo "Image published to \`ghcr.io/${{ github.repository }}:prod\` (also tagged \`latest\` and \`${{ github.sha }}\`)."
+            echo "Image published to \`${{ env.IMAGE }}:prod\` (also tagged \`latest\` and \`${{ github.sha }}\`)."
             echo
             echo "| Gate | Result |"
             echo "|---|---|"

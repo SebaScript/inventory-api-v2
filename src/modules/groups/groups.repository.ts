@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SortOrder } from '../../common/dto/pagination-query.dto';
+import { Item } from '../items/entities/item.entity';
 import { Group } from './entities/group.entity';
 import { GroupSortField, type QueryGroupsDto } from './dto/query-groups.dto';
 
@@ -83,8 +84,14 @@ export class GroupsRepository {
     return (result.affected ?? 0) > 0;
   }
 
+  /**
+   * How many items reference this group, used to refuse deleting a non-empty one.
+   *
+   * Counted through the `Item` entity rather than a table-name string, so a
+   * rename is a compile error instead of a silent runtime failure.
+   */
   countItems(groupId: number): Promise<number> {
-    return this.repository.manager.count('items', { where: { groupId } });
+    return this.repository.manager.countBy(Item, { groupId });
   }
 
   exists(id: number): Promise<boolean> {

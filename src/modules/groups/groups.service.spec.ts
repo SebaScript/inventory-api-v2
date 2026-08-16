@@ -168,6 +168,29 @@ describe('GroupsService', () => {
       expect(repository.findByName).not.toHaveBeenCalled();
     });
 
+    it('renames without touching the description', async () => {
+      repository.findById.mockResolvedValue(buildGroup());
+      repository.findByName.mockResolvedValue(null);
+      repository.update.mockResolvedValue(buildGroup({ name: 'Renamed' }));
+
+      await service.update(1, { name: 'Renamed' });
+
+      expect(repository.update).toHaveBeenCalledWith(1, { name: 'Renamed' });
+    });
+
+    it('updates both fields at once', async () => {
+      repository.findById.mockResolvedValue(buildGroup());
+      repository.findByName.mockResolvedValue(null);
+      repository.update.mockResolvedValue(buildGroup());
+
+      await service.update(1, { name: 'Renamed', description: 'New' });
+
+      expect(repository.update).toHaveBeenCalledWith(1, {
+        name: 'Renamed',
+        description: 'New',
+      });
+    });
+
     it('treats an explicit null description as a clear', async () => {
       repository.findById.mockResolvedValue(buildGroup());
       repository.update.mockResolvedValue(buildGroup({ description: null }));
