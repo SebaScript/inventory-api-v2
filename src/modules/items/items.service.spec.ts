@@ -232,6 +232,49 @@ describe('ItemsService', () => {
       expect(itemsRepository.update).toHaveBeenCalledWith(1, { sku: 'NEW-SKU' });
     });
 
+    it('moves an item to another group', async () => {
+      itemsRepository.findById.mockResolvedValue(buildItem());
+      itemsRepository.update.mockResolvedValue(buildItem({ groupId: 2 }));
+
+      await service.update(1, { groupId: 2 });
+
+      expect(groupsRepository.exists).toHaveBeenCalledWith(2);
+      expect(itemsRepository.update).toHaveBeenCalledWith(1, { groupId: 2 });
+    });
+
+    it('clears the description when null is sent explicitly', async () => {
+      itemsRepository.findById.mockResolvedValue(buildItem({ description: 'Old' }));
+      itemsRepository.update.mockResolvedValue(buildItem({ description: null }));
+
+      await service.update(1, { description: null });
+
+      expect(itemsRepository.update).toHaveBeenCalledWith(1, { description: null });
+    });
+
+    it('updates several fields in one call', async () => {
+      itemsRepository.findById.mockResolvedValue(buildItem());
+      itemsRepository.findBySku.mockResolvedValue(null);
+      itemsRepository.update.mockResolvedValue(buildItem());
+
+      await service.update(1, {
+        groupId: 2,
+        name: 'Renamed',
+        description: 'New',
+        sku: 'new-1',
+        minimumStock: 7,
+        unitPrice: 3.5,
+      });
+
+      expect(itemsRepository.update).toHaveBeenCalledWith(1, {
+        groupId: 2,
+        name: 'Renamed',
+        description: 'New',
+        sku: 'NEW-1',
+        minimumStock: 7,
+        unitPrice: 3.5,
+      });
+    });
+
     it('accepts minimumStock of zero rather than treating it as absent', async () => {
       itemsRepository.findById.mockResolvedValue(buildItem());
       itemsRepository.update.mockResolvedValue(buildItem());
