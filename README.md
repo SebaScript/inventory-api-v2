@@ -730,6 +730,7 @@ Database errors are translated rather than leaked: `23505` → `409`, `23503` �
 357 tests across three layers, run together in a single command with one merged coverage report.
 
 ```bash
+npm run report            # the dashboard: success rate + both coverage gates
 npm test                  # everything
 npm run test:unit         # unit only — no database needed
 npm run test:integration  # real PostgreSQL
@@ -759,6 +760,45 @@ Group CRUD, Item CRUD, `IN`, `OUT`, insufficient stock, validation across body/p
 ---
 
 ## Coverage
+
+### Checking it
+
+One command runs the suite and reports the test success rate together with the coverage of **both environment gates**, because coverage does not depend on the environment — only the threshold does.
+
+```bash
+npm run report        # full suite, then the dashboard   (~15s)
+npm run report:fast   # unit tests only, no database     (~3s, partial coverage)
+npm run report:last   # re-print the previous run        (instant)
+```
+
+```
+INVENTORY API — QUALITY REPORT
+
+TESTS
+  Suites        18 / 18 passed
+  Tests         357 / 357 passed   100.00%
+  Zero failures PASS
+  Ran in 14.4s
+
+COVERAGE
+  Metric          Covered          Test (60%)  Production (85%)
+  lines           100.00%                PASS              PASS  (778/778)
+  statements      100.00%                PASS              PASS  (871/871)
+  functions       100.00%                PASS              PASS  (165/165)
+  branches         95.68%                PASS              PASS  (288/301)
+
+QUALITY GATES
+  Test (>= 60%)             PASS   develop · test-pipeline.yml
+  Production (>= 85%)       PASS   main · production-pipeline.yml
+```
+
+When a gate is missed the report names the failing tests and says exactly how many points short each metric is, per environment. It exits non-zero on the strictest gate, so the same command works as a pre-push check.
+
+It never relaxes anything: enforcement in CI remains Jest's own `coverageThreshold`. The report only neutralises that threshold *while collecting*, so a miss produces a full explanation rather than a bare non-zero exit.
+
+For a line-by-line view, open `coverage/index.html` after any run.
+
+### Current figures
 
 | Metric     | Achieved   | Test gate | Production gate |
 | ---------- | ---------- | --------- | --------------- |
