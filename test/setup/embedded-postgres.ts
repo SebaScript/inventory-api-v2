@@ -1,5 +1,6 @@
 import EmbeddedPostgres from 'embedded-postgres';
 import { existsSync, rmSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { join } from 'node:path';
 
 const DATA_DIR = join(process.cwd(), '.pgdata', 'jest');
@@ -22,7 +23,36 @@ let instance: EmbeddedPostgres | undefined;
  * In CI and inside Docker a server already exists, and `DATABASE_URL` is set;
  * this module then does nothing at all.
  */
+/** Resolves true when something is already listening on the given port. */
+const isPortInUse = (port: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    const socket = createConnection({ host: '127.0.0.1', port });
+    const settle = (inUse: boolean) => {
+      socket.destroy();
+      resolve(inUse);
+    };
+    socket.setTimeout(1000);
+    socket.once('connect', () => settle(true));
+    socket.once('timeout', () => settle(false));
+    socket.once('error', () => settle(false));
+  });
+
 export const startEmbeddedPostgres = async (): Promise<string> => {
+  // A run that was killed mid-flight leaves its postmaster alive, and the next
+  // `initialise()` then dies with "pre-existing shared memory block is still in
+  // use" — accurate, but nobody guesses the fix from it. Detecting the occupied
+  // port turns a confusing failure into a one-line instruction.
+  if (await isPortInUse(PORT)) {
+    throw new Error(
+      `Port ${PORT} is already in use, so the test PostgreSQL cannot start.\n` +
+        `This is usually a server left behind by a test run that was interrupted.\n\n` +
+        `  Windows:  Get-Process postgres | Stop-Process -Force\n` +
+        `  macOS/Linux:  pkill -f "postgres.*${PORT}"\n\n` +
+        `Or point the suite at another port with EMBEDDED_PG_PORT, or at an\n` +
+        `existing server with DATABASE_URL.`,
+    );
+  }
+
   // A leftover data directory from a hard-killed previous run would make
   // `initialise()` fail, so always start from a clean slate.
   if (existsSync(DATA_DIR)) {

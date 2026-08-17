@@ -38,7 +38,10 @@
     "docker:test": "docker compose --env-file .env.test -f docker-compose.test.yml up --build",
     "docker:test:down": "docker compose --env-file .env.test -f docker-compose.test.yml down -v",
     "docker:prod": "docker compose --env-file .env.production -f docker-compose.prod.yml up --build -d",
-    "docker:prod:down": "docker compose --env-file .env.production -f docker-compose.prod.yml down -v"
+    "docker:prod:down": "docker compose --env-file .env.production -f docker-compose.prod.yml down -v",
+    "report": "node scripts/quality-report.js",
+    "report:fast": "node scripts/quality-report.js --fast",
+    "report:last": "node scripts/quality-report.js --last"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.1",
