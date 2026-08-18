@@ -1,0 +1,66 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Paginated } from '../common/pagination';
+import { Group } from '../entities/group.entity';
+import { CreateGroupDto, FindGroupsDto, UpdateGroupDto } from './group.dto';
+import { GroupsService } from './groups.service';
+
+@ApiTags('Groups')
+@Controller('groups')
+export class GroupsController {
+  constructor(private readonly service: GroupsService) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Create a group' })
+  @ApiResponse({ status: 201, type: Group })
+  @ApiResponse({ status: 409, description: 'Name already taken' })
+  create(@Body() dto: CreateGroupDto): Promise<Group> {
+    return this.service.create(dto);
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'List groups (paginated, searchable)' })
+  findAll(@Query() query: FindGroupsDto): Promise<Paginated<Group>> {
+    return this.service.findAll(query);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get one group' })
+  @ApiResponse({ status: 200, type: Group })
+  @ApiResponse({ status: 404, description: 'Not found' })
+  findOne(@Param('id', ParseIntPipe) id: number): Promise<Group> {
+    return this.service.findOne(id);
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Replace a group (omitted fields are cleared)' })
+  replace(@Param('id', ParseIntPipe) id: number, @Body() dto: CreateGroupDto): Promise<Group> {
+    return this.service.replace(id, dto);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update a group (only sent fields change)' })
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateGroupDto): Promise<Group> {
+    return this.service.update(id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Delete a group' })
+  @ApiResponse({ status: 409, description: 'The group still has items' })
+  remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
+    return this.service.remove(id);
+  }
+}
