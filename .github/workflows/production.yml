@@ -1,0 +1,66 @@
+# Production pipeline — guards the `main` branch.
+#
+#   install -> lint -> build -> tests -> coverage >= 85% -> deploy Production
+#
+# Each step runs in order and the job stops at the first failure, so a red test
+# or a missed coverage bar makes the deploy step unreachable.
+name: Production Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+
+    services:
+      # Real PostgreSQL: the tests assert on transactions, row locks and CHECK
+      # constraints, none of which can be faked.
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: inventory
+          POSTGRES_PASSWORD: inventory
+          POSTGRES_DB: inventory_prod_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://inventory:inventory@localhost:5432/inventory_prod_ci
+      # Production's quality bar.
+      COVERAGE_MIN: 85
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # Jest exits non-zero on a failing test AND on missed coverage, so this
+      # single step is both the test run and the quality gate.
+      - name: Test and coverage gate (>= 85%)
+        run: npm run test:cov
+
+      - name: Build the Docker image
+        run: docker build -t inventory-api:prod .
+
+      - name: Deploy to Production
+        run: |
+          echo "Publishing image for the Production environment"
+          docker tag inventory-api:prod ghcr.io/${GITHUB_REPOSITORY,,}:prod
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker push ghcr.io/${GITHUB_REPOSITORY,,}:prod

@@ -1,71 +1,29 @@
-import { type Config } from 'jest';
+import type { Config } from 'jest';
 
 /**
- * Coverage quality gate.
- *
- * The threshold is supplied by the pipeline rather than hard-coded, because the
- * two environments demand different bars: 60% for Test, 85% for Production.
- * Jest exits non-zero when the bar is missed, which is what actually blocks the
- * deployment — there is no `|| true` anywhere in the pipelines.
+ * The coverage bar comes from the environment, so the same command enforces 60%
+ * in the Test pipeline and 85% in the Production one. Jest exits non-zero when
+ * it is missed — that non-zero exit *is* the quality gate.
  */
 const COVERAGE_MIN = Number(process.env.COVERAGE_MIN ?? 85);
 
-const tsPreset = {
-  transform: {
-    '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
-  },
-  moduleFileExtensions: ['ts', 'js', 'json'],
-};
-
 const config: Config = {
   rootDir: '.',
-
-  // Boots (and tears down) a real PostgreSQL once for the entire run.
-  globalSetup: '<rootDir>/test/setup/global-setup.ts',
-  globalTeardown: '<rootDir>/test/setup/global-teardown.ts',
-
-  projects: [
-    {
-      displayName: 'unit',
-      ...tsPreset,
-      testEnvironment: 'node',
-      testMatch: ['<rootDir>/src/**/*.spec.ts'],
-    },
-    {
-      displayName: 'integration',
-      ...tsPreset,
-      testEnvironment: 'node',
-      testMatch: ['<rootDir>/test/integration/**/*.int-spec.ts'],
-      // Integration tests share one database and assert on row locks, so they
-      // must not race each other.
-      maxWorkers: 1,
-    },
-    {
-      displayName: 'e2e',
-      ...tsPreset,
-      testEnvironment: 'node',
-      testMatch: ['<rootDir>/test/e2e/**/*.e2e-spec.ts'],
-      maxWorkers: 1,
-    },
-  ],
+  testEnvironment: 'node',
+  transform: { '^.+\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }] },
+  testMatch: ['<rootDir>/test/**/*.spec.ts'],
+  // Tests share one database, so they must not race each other.
+  maxWorkers: 1,
+  testTimeout: 30_000,
 
   collectCoverageFrom: [
     'src/**/*.ts',
-    // Test files are not production code.
-    '!src/**/*.spec.ts',
-    // Process entry points: they wire up and call `listen`/`exit`, which is
-    // exercised by actually starting the app, not by a unit test.
-    '!src/main.ts',
-    '!src/database/seeds/run-seed.ts',
-    // Nest modules are declarative wiring with no branches to cover; they are
-    // validated implicitly because the E2E suite fails to boot if they are wrong.
-    '!src/**/*.module.ts',
-    // Migrations are verified by every integration test: none of them could run
-    // without the schema these produce.
-    '!src/database/migrations/**',
+    '!src/main.ts', // process entry point: wires up and calls listen()
+    '!src/**/*.module.ts', // declarative wiring; a mistake fails every test
+    '!src/database/migrations/**', // proven by every test that needs the schema
   ],
-  coverageDirectory: '<rootDir>/coverage',
-  coverageReporters: ['text-summary', 'lcov', 'json-summary', 'html'],
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text-summary', 'json-summary', 'html'],
   coverageThreshold: {
     global: {
       lines: COVERAGE_MIN,
@@ -74,10 +32,6 @@ const config: Config = {
       branches: COVERAGE_MIN,
     },
   },
-
-  testTimeout: 30_000,
-  clearMocks: true,
-  verbose: false,
 };
 
 export default config;
