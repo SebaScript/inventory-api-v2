@@ -1,48 +1,27 @@
 {
   "compilerOptions": {
     "module": "commonjs",
-    "declaration": false,
-    "removeComments": true,
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true,
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
     "target": "ES2023",
     "lib": ["ES2023"],
-    "sourceMap": true,
     "outDir": "./dist",
-    "baseUrl": "./",
-    "incremental": true,
+
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
+    "sourceMap": true,
+
     "strict": true,
-    "strictNullChecks": true,
+    // Entity and DTO fields are assigned by TypeORM and class-transformer, not
+    // by a constructor, so this check does not apply to them.
     "strictPropertyInitialization": false,
-    "noImplicitAny": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    // Deliberately NOT using isolatedModules. It makes TypeScript emit
-    // defensive `typeof X !== "undefined"` guards inside every decorator's
-    // design:paramtypes metadata, which the coverage instrumenter counts as
-    // real, permanently-uncovered branches — dozens of phantom misses per
-    // controller. The discipline it would enforce (explicit `import type`) is
-    // already enforced by the @typescript-eslint/consistent-type-imports rule.
-    //
-    // Decorator helpers come from tslib rather than being inlined in every file.
-    "importHelpers": true,
-    "types": ["node", "jest"],
-    "paths": {
-      // `embedded-postgres` is a pure-ESM package that ships only an `exports`
-      // field, so classic Node resolution cannot find its declarations. This
-      // maps the specifier straight at the real .d.ts it publishes.
-      //
-      // Type-only: the emitted `require('embedded-postgres')` is untouched, and
-      // Node's require(ESM) interop resolves it correctly at runtime.
-      "embedded-postgres": ["./node_modules/embedded-postgres/dist/index.d.ts"]
-    }
+
+    "types": ["node", "jest"]
   },
   "include": ["src/**/*", "test/**/*", "jest.config.ts"],
   "exclude": ["node_modules", "dist", "coverage"]
