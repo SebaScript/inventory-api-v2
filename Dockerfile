@@ -1,69 +1,30 @@
-# syntax=docker/dockerfile:1
-
-# ---------------------------------------------------------------------------
-# Multi-stage build.
-#
-# The runtime image carries only compiled JavaScript and production
-# dependencies: no TypeScript compiler, no test framework, no source. That keeps
-# the image small and removes build tooling from the attack surface.
-#
-# Node 24 is pinned deliberately: the HTTP QUERY verb this API exposes needs a
-# runtime whose HTTP parser recognises it (Node 22+).
-# ---------------------------------------------------------------------------
-ARG NODE_VERSION=24-alpine
-
-# --- Stage 1: full dependency tree, used to compile -------------------------
-FROM node:${NODE_VERSION} AS deps
+# Multi-stage build: the final image carries only compiled JavaScript and
+# production dependencies — no compiler, no tests, no source.
+FROM node:24-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json ./
-# `npm ci` installs exactly the lockfile, so an image built today and one built
-# next month contain the same dependency tree.
+COPY package*.json ./
 RUN npm ci
-
-# --- Stage 2: compile TypeScript -------------------------------------------
-FROM node:${NODE_VERSION} AS build
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json package-lock.json tsconfig.json tsconfig.build.json nest-cli.json ./
+COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
-RUN npm run build
+RUN npm run build && npm prune --omit=dev
 
-# --- Stage 3: production dependencies only ----------------------------------
-FROM node:${NODE_VERSION} AS prod-deps
+FROM node:24-alpine
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+ENV NODE_ENV=production
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY package.json ./
 
-# --- Stage 4: runtime -------------------------------------------------------
-FROM node:${NODE_VERSION} AS runner
-
-# dumb-init becomes PID 1 so SIGTERM reaches Node directly. Without it Node runs
-# as PID 1, ignores default signal handling, and `docker compose down` has to
-# wait for the kill timeout on every stop.
-RUN apk add --no-cache dumb-init
-
-ENV NODE_ENV=production \
-    PORT=3000
-
-WORKDIR /app
-
-COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
-COPY --from=build     --chown=node:node /app/dist        ./dist
-COPY --chown=node:node package.json ./
-COPY --chown=node:node docker/entrypoint.sh docker/healthcheck.js ./docker/
-
-RUN chmod +x ./docker/entrypoint.sh
-
-# Never run as root. The image ships with an unprivileged `node` user already.
+# Never run as root. The official image already ships an unprivileged user.
 USER node
-
 EXPOSE 3000
 
-# Implemented in Node rather than curl, so no extra package is installed just to
-# probe the service. It hits the same /health endpoint clients use, which also
-# verifies PostgreSQL connectivity.
-HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
-  CMD ["node", "docker/healthcheck.js"]
+# Uses the same /health endpoint clients use, so a healthy container is one
+# that can actually reach PostgreSQL. wget ships with Alpine's busybox.
+#
+# 127.0.0.1 rather than localhost: inside the container localhost resolves to
+# ::1 first while Node listens on IPv4, so the check would be refused.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:3000/health || exit 1
 
-ENTRYPOINT ["dumb-init", "--", "./docker/entrypoint.sh"]
 CMD ["node", "dist/main.js"]
