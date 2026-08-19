@@ -46,22 +46,16 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Quality gate 1 - the rubric allows zero failing tests. Jest exits
-      # non-zero if a single test fails, and also if it finds no tests at all,
-      # so the gate cannot be passed by deleting the suite.
-      - name: Quality gate 1 - automated tests (0 failures allowed)
+      - name: Quality gate 1 - automated tests (0 failures)
         run: npm test
 
-      # Quality gate 2 - the coverage bar for this environment. COVERAGE_MIN
-      # feeds Jest's coverageThreshold, and missing it exits non-zero as well.
-      - name: Quality gate 2 - coverage (>= 60%)
+      - name: Quality gate 2 - coverage >= 60%
         run: npm run test:cov
 
       - name: Build the Docker image
         run: docker build -t inventory-api:test .
 
       - name: Deploy to Test
-        if: github.event_name == 'push'
         run: |
           echo "Publishing image for the Test environment"
           docker tag inventory-api:test ghcr.io/${GITHUB_REPOSITORY,,}:test
