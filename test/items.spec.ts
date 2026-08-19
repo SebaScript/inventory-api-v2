@@ -25,7 +25,6 @@ describe('Items', () => {
 
     await create({ name: 'USB Hub', sku: 'H1', quantity: 40, unitPrice: 19.99 }).expect(201);
 
-    // Only the item with opening stock produced a ledger entry.
     const ledger = await api.get('/movements').expect(200);
     expect(ledger.body.meta.total).toBe(1);
     expect(ledger.body.data[0]).toMatchObject({ type: 'IN', quantity: 40, resultingStock: 40 });
@@ -41,8 +40,8 @@ describe('Items', () => {
       .expect(404);
     expect(orphan.body.code).toBe('GROUP_NOT_FOUND');
 
-    await create({ name: 'A', sku: 'S1' }).expect(400); // name too short
-    await create({ name: 'Valid', sku: 'S1', unitPrice: 1.234 }).expect(400); // 3 decimals
+    await create({ name: 'A', sku: 'S1' }).expect(400);
+    await create({ name: 'Valid', sku: 'S1', unitPrice: 1.234 }).expect(400);
   });
 
   it('lists items with their group and filters by search, group and low stock', async () => {
@@ -60,11 +59,6 @@ describe('Items', () => {
     expect(low.body.data.map((i: { sku: string }) => i.sku)).toEqual(['H1', 'P1']);
   });
 
-  /**
-   * The QUERY verb: safe and idempotent like GET, but with a request body. The
-   * filter below — a list of group ids plus a price range — is exactly what a
-   * query string handles badly.
-   */
   it('searches with the real QUERY verb, using a body a query string could not carry', async () => {
     await create({ name: 'USB Cable', sku: 'C1', unitPrice: 12.5 }).expect(201);
     await create({ name: 'USB Hub', sku: 'H1', unitPrice: 45 }).expect(201);
@@ -92,7 +86,6 @@ describe('Items', () => {
   it('PUT replaces and PATCH merges, and neither lets the client set the stock', async () => {
     await create({ name: 'Cable', sku: 'C1', quantity: 50, minimumStock: 5 }).expect(201);
 
-    // PUT clears the omitted minimumStock but never touches the stock.
     const replaced = await api
       .put('/items/1')
       .send({ groupId: 1, name: 'New', sku: 'C1' })
@@ -107,10 +100,6 @@ describe('Items', () => {
     expect(JSON.stringify(rejected.body.message)).toContain('quantity');
   });
 
-  /**
-   * DELETE means "withdrawn from service", not "erased" — this is what keeps
-   * the movement history auditable after a product is retired.
-   */
   it('discontinues on DELETE, keeping the item and its whole history', async () => {
     await create({ name: 'Cable', sku: 'C1', quantity: 50 }).expect(201);
     await api.post('/movements').send({ itemId: 1, type: 'OUT', quantity: 10 }).expect(201);
@@ -137,7 +126,6 @@ describe('Items', () => {
       .expect(409);
     expect(move.body.code).toBe('ITEM_DISCONTINUED');
 
-    // The SKU stays taken, so old movements never become ambiguous.
     await create({ name: 'Reused', sku: 'C1' }).expect(409);
 
     await api.patch('/items/1').send({ status: 'ACTIVE' }).expect(200);

@@ -9,7 +9,6 @@ import {
 } from 'typeorm';
 import { Item } from './item.entity';
 
-/** A category items belong to. */
 @Entity('groups')
 export class Group {
   @ApiProperty({ example: 1 })

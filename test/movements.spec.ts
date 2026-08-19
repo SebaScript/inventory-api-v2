@@ -2,11 +2,6 @@ import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { createApp, reset } from './app.factory';
 
-/**
- * The inventory rule is the heart of the project, so it is tested against a
- * real PostgreSQL: atomicity, the refusal to go negative, behaviour under
- * concurrency, and the CHECK constraint that backs it all up.
- */
 describe('Movements and the inventory rule', () => {
   let app: INestApplication;
   let dataSource: DataSource;
@@ -47,18 +42,10 @@ describe('Movements and the inventory rule', () => {
     const res = await move({ itemId: 1, type: 'OUT', quantity: 10 }).expect(409);
     expect(res.body).toMatchObject({ code: 'INSUFFICIENT_STOCK', available: 3, requested: 10 });
 
-    // The transaction rolled back: the stock is untouched and no entry exists.
     expect(await stockOf()).toBe(3);
-    expect((await api.get('/movements').expect(200)).body.meta.total).toBe(1); // only the opening IN
+    expect((await api.get('/movements').expect(200)).body.meta.total).toBe(1);
   });
 
-  /**
-   * The test that justifies `SELECT ... FOR UPDATE`.
-   *
-   * Two OUT movements of 60 against a stock of 100: only one can succeed.
-   * Without the row lock both would read 100, both would conclude that 40
-   * remains, and both would commit — 120 units leaving a warehouse of 100.
-   */
   it('serialises concurrent OUT movements so the item cannot be oversold', async () => {
     await addItem(100);
 
@@ -81,7 +68,7 @@ describe('Movements and the inventory rule', () => {
     await move({ itemId: 1, type: 'OUT', quantity: 10 }).expect(201);
 
     const all = await api.get('/movements').expect(200);
-    expect(all.body.meta.total).toBe(2); // the opening IN plus the explicit OUT
+    expect(all.body.meta.total).toBe(2);
     expect(all.body.data[0].type).toBe('OUT');
 
     expect((await api.get('/movements?type=OUT').expect(200)).body.meta.total).toBe(1);
@@ -97,11 +84,10 @@ describe('Movements and the inventory rule', () => {
     );
     expect((await api.get('/movements/999').expect(404)).body.code).toBe('MOVEMENT_NOT_FOUND');
 
-    await move({ itemId: 1, type: 'IN', quantity: 0 }).expect(400); // must be positive
-    await move({ itemId: 1, type: 'ADJUST', quantity: 1 }).expect(400); // IN or OUT only
+    await move({ itemId: 1, type: 'IN', quantity: 0 }).expect(400);
+    await move({ itemId: 1, type: 'ADJUST', quantity: 1 }).expect(400);
     await move({ itemId: 1, type: 'IN', quantity: 1, resultingStock: 999 }).expect(400);
 
-    // The ledger is append-only: these routes simply do not exist.
     await api.patch('/movements/1').send({ quantity: 1 }).expect(404);
     await api.delete('/movements/1').expect(404);
   });

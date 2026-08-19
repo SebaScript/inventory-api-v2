@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Build and verify. Produces the artifact; deploys nothing.
   pipeline:
     runs-on: ubuntu-latest
 
@@ -61,29 +60,15 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker push ghcr.io/${GITHUB_REPOSITORY,,}:prod
 
-  # The deployment itself: this is what updates the API that is running.
-  #
-  # It runs on a self-hosted runner because that machine is the Production
-  # host. GitHub cannot reach into it, so the runner reaches out, pulls the
-  # image the job above published, and restarts the stack with it. Nothing is
-  # ever built here — the server runs the exact artifact that passed the gates.
-  #
-  # `needs: pipeline` is what makes the gates binding: if either gate fails,
-  # the job above fails and this one never starts.
   deploy:
     needs: pipeline
     if: github.event_name != 'pull_request'
     runs-on: self-hosted
 
-    # The environment holds its own secrets, and GitHub records a deployment
-    # against it on every run.
     environment:
       name: production
       url: http://localhost:3200
 
-    # PowerShell, not bash: on a Windows runner `bash` resolves to the WSL stub
-    # in WindowsApps, while Git Bash sits outside PATH. PowerShell is always
-    # present and needs no machine-specific setup.
     defaults:
       run:
         shell: powershell

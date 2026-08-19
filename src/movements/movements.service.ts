@@ -19,14 +19,6 @@ export class MovementsService {
     private readonly dataSource: DataSource,
   ) {}
 
-  /**
-   * The core operation. Three guarantees at once:
-   *  1. Atomic — ledger entry and new stock are written in one transaction.
-   *  2. Never negative — an oversized OUT throws before anything is written.
-   *  3. Safe under concurrency — `SELECT ... FOR UPDATE` serialises writers.
-   *     Without the lock two simultaneous OUTs would both read the same stock,
-   *     both decide they fit, and both commit, overselling the item.
-   */
   async create(dto: CreateMovementDto): Promise<Movement> {
     return this.dataSource.transaction(async (manager) => {
       const item = await manager

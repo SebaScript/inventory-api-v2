@@ -32,15 +32,13 @@ describe('Application', () => {
       expect.arrayContaining(['/groups', '/items', '/items/{id}', '/movements', '/health']),
     );
 
-    // OpenAPI 3.0 has a closed list of methods that excludes `query`, so the
-    // canonical verb is documented in prose instead.
     expect(body.paths['/items/search']).not.toHaveProperty('query');
     expect(body.info.description).toContain('QUERY /items/search');
   });
 
   it('seeds demo data where every stock equals the sum of its own movements', async () => {
     expect(await seed(dataSource)).toContain('Seed complete');
-    expect(await seed(dataSource)).toContain('skipped'); // idempotent on restart
+    expect(await seed(dataSource)).toContain('skipped');
 
     for (const item of await dataSource.getRepository(Item).find()) {
       const movements = await dataSource.getRepository(Movement).findBy({ itemId: item.id });

@@ -17,13 +17,7 @@ export enum ItemStatus {
   DISCONTINUED = 'DISCONTINUED',
 }
 
-/**
- * `quantity` is derived: written only inside the transaction that records a
- * Movement. Items are never physically deleted — DELETE marks them
- * DISCONTINUED so their history stays auditable.
- */
 @Entity('items')
-// The invariant's last line of defence, enforced by PostgreSQL itself.
 @Check('quantity >= 0')
 export class Item {
   @ApiProperty({ example: 1 })
@@ -73,7 +67,6 @@ export class Item {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  // RESTRICT: deleting a category must never destroy the inventory inside it.
   @ApiProperty({ type: () => Group, required: false })
   @ManyToOne(() => Group, (group) => group.items, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'group_id' })

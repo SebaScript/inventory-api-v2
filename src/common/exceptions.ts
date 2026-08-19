@@ -1,12 +1,5 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 
-/**
- * Business failures as HTTP exceptions. Extending Nest's classes means throwing
- * one *is* the status code — there is no translation layer.
- *
- * Clients branch on `code`; messages are for humans and may change.
- */
-
 export class GroupNotFoundException extends NotFoundException {
   constructor(id: number) {
     super({ code: 'GROUP_NOT_FOUND', message: `Group ${id} was not found` });
@@ -58,9 +51,6 @@ export class GroupNotEmptyException extends ConflictException {
   }
 }
 
-/**
- * Carries the numbers the caller needs to recover, not just "not enough stock".
- */
 export class InsufficientStockException extends ConflictException {
   constructor(itemId: number, available: number, requested: number) {
     super({

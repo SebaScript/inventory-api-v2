@@ -20,7 +20,6 @@ export class CreateGroupDto {
   description?: string;
 }
 
-/** PATCH: every field optional, only what is sent changes. */
 export class UpdateGroupDto extends PartialType(CreateGroupDto) {}
 
 export class FindGroupsDto extends PaginationDto {
