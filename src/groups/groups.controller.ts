@@ -8,7 +8,6 @@ import {
   ParseIntPipe,
   Patch,
   Post,
-  Put,
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -44,14 +43,8 @@ export class GroupsController {
     return this.service.findOne(id);
   }
 
-  @Put(':id')
-  @ApiOperation({ summary: 'Replace a group (omitted fields are cleared)' })
-  replace(@Param('id', ParseIntPipe) id: number, @Body() dto: CreateGroupDto): Promise<Group> {
-    return this.service.replace(id, dto);
-  }
-
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a group (only sent fields change)' })
+  @ApiOperation({ summary: 'Update a group: only the fields sent change' })
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateGroupDto): Promise<Group> {
     return this.service.update(id, dto);
   }

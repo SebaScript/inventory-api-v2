@@ -42,15 +42,17 @@ describe('Groups', () => {
     await api.get('/groups?limit=101').expect(400);
   });
 
-  it('PUT replaces the group while PATCH merges it', async () => {
+  it('PATCH changes only the fields that were sent', async () => {
     await create({ name: 'Electronics', description: 'Original' }).expect(201);
 
-    const replaced = await api.put('/groups/1').send({ name: 'Renamed' }).expect(200);
-    expect(replaced.body).toMatchObject({ name: 'Renamed', description: null });
+    const renamed = await api.patch('/groups/1').send({ name: 'Renamed' }).expect(200);
+    expect(renamed.body).toMatchObject({ name: 'Renamed', description: 'Original' });
 
-    const patched = await api.patch('/groups/1').send({ name: 'Electronics' }).expect(200);
-    expect(patched.body).toMatchObject({ name: 'Electronics', description: null });
+    // Omitting the name leaves it alone rather than clearing it.
+    const described = await api.patch('/groups/1').send({ description: 'Only this' }).expect(200);
+    expect(described.body).toMatchObject({ name: 'Renamed', description: 'Only this' });
 
+    // Renaming onto another group's name is still a conflict.
     await create({ name: 'Tools' }).expect(201);
     await api.patch('/groups/1').send({ name: 'tools' }).expect(409);
   });
@@ -72,7 +74,6 @@ describe('Groups', () => {
     expect(res.body.code).toBe('GROUP_NOT_FOUND');
 
     await api.patch('/groups/999').send({ name: 'Nope' }).expect(404);
-    await api.put('/groups/999').send({ name: 'Nope' }).expect(404);
     await api.delete('/groups/999').expect(404);
     await api.get('/groups/abc').expect(400);
   });

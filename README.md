@@ -31,8 +31,7 @@ A group is a category. It is the dimension items are classified by.
 | `POST` | `/groups` | Creates a category. The name is unique, case insensitive |
 | `GET` | `/groups` | Lists categories, paginated. `?search` matches the name |
 | `GET` | `/groups/:id` | Returns one category |
-| `PUT` | `/groups/:id` | Replaces it — an omitted description is **cleared** |
-| `PATCH` | `/groups/:id` | Updates only the fields that were sent |
+| `PATCH` | `/groups/:id` | Updates only the fields that were sent; the rest stay as they are |
 | `DELETE` | `/groups/:id` | Deletes it, but only if it is empty — otherwise `409` |
 
 ### Items: `/items`
@@ -46,8 +45,7 @@ An item is a product. It holds the **current state**: how much stock there is ri
 | **`QUERY`** | **`/items/search`** | Advanced search whose filter travels in the **body**: free text, a *list* of categories and a price range |
 | `POST` | `/items/search` | The same search, for clients and tools that cannot send the QUERY verb |
 | `GET` | `/items/:id` | Returns one product, discontinued ones included |
-| `PUT` | `/items/:id` | Replaces the editable fields. The stock is not one of them |
-| `PATCH` | `/items/:id` | Updates only what was sent. Also brings a product back with `{"status":"ACTIVE"}` |
+| `PATCH` | `/items/:id` | Updates only the fields that were sent. The stock is never one of them. Also brings a product back with `{"status":"ACTIVE"}` |
 | `DELETE` | `/items/:id` | **Discontinues** it: it leaves the listings and accepts no more movements, but neither it nor its history is erased |
 
 ### Movements: `/movements`
@@ -65,14 +63,6 @@ A movement is an entry or exit of stock. It is the **immutable event log** that 
 | Method | Path | What it does |
 |---|---|---|
 | `GET` | `/health` | Runs a real query against PostgreSQL. `503` if the database is unreachable. Docker uses it as the container `HEALTHCHECK` |
-
-### Postman
-
-`postman/` holds a collection covering every endpoint, plus one environment per
-deployment. Import the four files, pick an environment, and **Run collection**:
-the folders run in order and each request carries tests, so a green run means
-the API behaved. Folder 5 sends requests that are meant to fail — that is where
-the business rules are visible. See `postman/README.md`.
 
 ### Errors
 
@@ -150,7 +140,7 @@ npm run report     # suite + coverage against both gates
 
 | File | Covers |
 |---|---|
-| `test/groups.spec.ts` | Group CRUD, PUT vs PATCH, uniqueness, delete rules |
+| `test/groups.spec.ts` | Group CRUD, uniqueness, delete rules |
 | `test/items.spec.ts` | Item CRUD, filters, **the QUERY endpoint**, discontinuation |
 | `test/movements.spec.ts` | IN, OUT, insufficient stock, **concurrency**, the CHECK constraint |
 | `test/errors.spec.ts` | Error shape, database error mapping, no leaks in production |

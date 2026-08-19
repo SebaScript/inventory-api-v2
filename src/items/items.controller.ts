@@ -8,20 +8,13 @@ import {
   ParseIntPipe,
   Patch,
   Post,
-  Put,
   Query,
   QueryMethod,
 } from '@nestjs/common';
 import { ApiBody, ApiExcludeEndpoint, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Paginated } from '../common/pagination';
 import { Item } from '../entities/item.entity';
-import {
-  CreateItemDto,
-  FindItemsDto,
-  ReplaceItemDto,
-  SearchItemsDto,
-  UpdateItemDto,
-} from './item.dto';
+import { CreateItemDto, FindItemsDto, SearchItemsDto, UpdateItemDto } from './item.dto';
 import { ItemsService } from './items.service';
 
 @ApiTags('Items')
@@ -78,14 +71,8 @@ export class ItemsController {
     return this.service.findOne(id);
   }
 
-  @Put(':id')
-  @ApiOperation({ summary: 'Replace an item (stock is preserved)' })
-  replace(@Param('id', ParseIntPipe) id: number, @Body() dto: ReplaceItemDto): Promise<Item> {
-    return this.service.replace(id, dto);
-  }
-
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an item (quantity is rejected here)' })
+  @ApiOperation({ summary: 'Update an item: only the fields sent change. quantity is rejected' })
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateItemDto): Promise<Item> {
     return this.service.update(id, dto);
   }
