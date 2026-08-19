@@ -3,11 +3,6 @@ import { Group } from '../entities/group.entity';
 import { Item } from '../entities/item.entity';
 import { Movement, MovementType } from '../entities/movement.entity';
 
-/**
- * Fixed demo data, no randomness, so every run produces the same numbers.
- * Items start empty and their stock is built by applying the movements, so the
- * ledger explains it by construction.
- */
 const GROUPS = ['Electronics', 'Office Supplies', 'Warehouse Tools'];
 
 /** [group, name, sku, minimumStock, unitPrice] */
@@ -20,16 +15,15 @@ const ITEMS: [string, string, string, number, number][] = [
   ['Warehouse Tools', 'Safety Gloves', 'WHSE-GLOVES', 40, 9.5],
 ];
 
-/** [sku, type, quantity] — applied in order. */
 const MOVEMENTS: [string, MovementType, number][] = [
   ['ELEC-USBC-2M', MovementType.IN, 150],
   ['ELEC-USBC-2M', MovementType.OUT, 65],
   ['ELEC-MOUSE', MovementType.IN, 80],
   ['ELEC-HUB', MovementType.IN, 25],
-  ['ELEC-HUB', MovementType.OUT, 25], // drained to zero
+  ['ELEC-HUB', MovementType.OUT, 25],
   ['OFFI-PAPER', MovementType.IN, 400],
   ['OFFI-PENS', MovementType.IN, 30],
-  ['OFFI-PENS', MovementType.OUT, 22], // leaves 8, below its minimum of 12
+  ['OFFI-PENS', MovementType.OUT, 22],
   ['WHSE-GLOVES', MovementType.IN, 200],
   ['WHSE-GLOVES', MovementType.OUT, 110],
 ];
@@ -37,7 +31,6 @@ const MOVEMENTS: [string, MovementType, number][] = [
 export async function seed(ds: DataSource): Promise<string> {
   const manager = ds.manager;
 
-  // Idempotent: a container restart must not duplicate the demo data.
   if (await manager.count(Group)) return 'Seed skipped: data already present';
 
   const groupIds = new Map<string, number>();

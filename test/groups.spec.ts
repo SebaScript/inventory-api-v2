@@ -45,15 +45,12 @@ describe('Groups', () => {
   it('PUT replaces the group while PATCH merges it', async () => {
     await create({ name: 'Electronics', description: 'Original' }).expect(201);
 
-    // PUT: the omitted description is cleared.
     const replaced = await api.put('/groups/1').send({ name: 'Renamed' }).expect(200);
     expect(replaced.body).toMatchObject({ name: 'Renamed', description: null });
 
-    // PATCH: the omitted description is kept.
     const patched = await api.patch('/groups/1').send({ name: 'Electronics' }).expect(200);
     expect(patched.body).toMatchObject({ name: 'Electronics', description: null });
 
-    // Renaming onto another group's name is still a conflict.
     await create({ name: 'Tools' }).expect(201);
     await api.patch('/groups/1').send({ name: 'tools' }).expect(409);
   });

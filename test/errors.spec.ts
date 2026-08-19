@@ -3,11 +3,6 @@ import { QueryFailedError } from 'typeorm';
 import { InsufficientStockException } from '../src/common/exceptions';
 import { HttpExceptionFilter } from '../src/common/http-exception.filter';
 
-/**
- * The filter is what stands between an internal failure and the client, so it
- * is tested directly: no database, no HTTP, just "given this error, what comes
- * out". These are the security-relevant paths.
- */
 function capture(filter: HttpExceptionFilter, error: unknown) {
   let status = 0;
   let body: Record<string, unknown> = {};
@@ -34,7 +29,6 @@ function capture(filter: HttpExceptionFilter, error: unknown) {
   return { status, body };
 }
 
-/** Builds a QueryFailedError carrying a specific PostgreSQL error code. */
 const pgError = (code: string) =>
   new QueryFailedError('INSERT INTO items ...', [], Object.assign(new Error('driver'), { code }));
 
@@ -49,12 +43,10 @@ describe('Error handling', () => {
     expect(notFound.body.path).toBe('/movements');
     expect(new Date(notFound.body.timestamp as string).toISOString()).toBe(notFound.body.timestamp);
 
-    // Insufficient stock also reports what was available and what was asked for.
     const stock = capture(dev, new InsufficientStockException(4, 3, 10));
     expect(stock.status).toBe(409);
     expect(stock.body).toMatchObject({ code: 'INSUFFICIENT_STOCK', available: 3, requested: 10 });
 
-    // An exception whose payload is a plain string still gets a code.
     expect(capture(dev, new NotFoundException('plain')).body.message).toBe('plain');
   });
 
@@ -83,7 +75,6 @@ describe('Error handling', () => {
     expect(hidden.body.message).toBe('Internal server error');
     expect(JSON.stringify(hidden.body)).not.toContain('hunter2');
 
-    // An unrecognised database error is treated the same way: nothing echoed.
     expect(JSON.stringify(capture(prod, pgError('XX000')).body)).not.toContain('INSERT INTO');
 
     expect(String(capture(dev, leaky).body.message)).toContain('hunter2');

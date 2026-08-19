@@ -15,9 +15,7 @@ const FOREIGN_KEY_VIOLATION = '23503';
 const CHECK_VIOLATION = '23514';
 
 /**
- * Two jobs: give every failure the same JSON shape, and keep internals out of
- * production responses (an unexpected error becomes a generic 500; the real
- * message goes to the log).
+ * Handles exceptions and converts them to a consistent JSON response.
  */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {

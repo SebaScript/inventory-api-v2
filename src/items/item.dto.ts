@@ -99,13 +99,6 @@ export class FindItemsDto extends PaginationDto {
   status?: StatusFilter;
 }
 
-/**
- * Body of `QUERY /items/search`.
- *
- * The nested shape — a list of group ids plus a price range — is why this
- * endpoint uses QUERY: it does not fit a query string without inventing an
- * encoding for arrays.
- */
 export class SearchItemsDto extends PaginationDto {
   @ApiPropertyOptional({ example: 'usb' })
   @Transform(trim)

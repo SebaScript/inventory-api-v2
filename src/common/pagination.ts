@@ -2,10 +2,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
-/** Hard ceiling, so a client can never ask for the whole table at once. */
 export const MAX_LIMIT = 100;
 
-/** Query parameters every list endpoint accepts. */
 export class PaginationDto {
   @ApiPropertyOptional({ minimum: 1, default: 1 })
   @IsOptional()
@@ -23,7 +21,6 @@ export class PaginationDto {
   limit = 20;
 }
 
-/** Envelope every list endpoint returns. */
 export class Paginated<T> {
   @ApiProperty({ isArray: true })
   data: T[];
@@ -39,7 +36,6 @@ export class Paginated<T> {
   }
 }
 
-/** `numeric` arrives from the pg driver as a string; convert so JSON has numbers. */
 export const numericColumn = {
   to: (value: number) => value,
   from: (value: string | null) => (value === null ? null : Number(value)),

@@ -14,15 +14,14 @@ async function bootstrap(): Promise<void> {
 
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true, // strip anything not on the DTO
-      forbidNonWhitelisted: true, // and reject it, so a typo is a loud 400
+      whitelist: true,
+      forbidNonWhitelisted: true,
       transform: true,
     }),
   );
   app.useGlobalFilters(new HttpExceptionFilter(isProduction));
   app.enableCors();
 
-  // Demo data must never reach production, whatever the variable says.
   if (process.env.SEED === 'true' && !isProduction) {
     logger.log(await seed(app.get(DataSource)));
   }

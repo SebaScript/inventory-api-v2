@@ -3,11 +3,6 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
-/**
- * An inventory API that cannot reach its database cannot serve a useful
- * request, so the check queries PostgreSQL rather than only reporting that the
- * process is alive. Docker uses this as the container HEALTHCHECK.
- */
 @ApiTags('Health')
 @Controller('health')
 export class HealthController {

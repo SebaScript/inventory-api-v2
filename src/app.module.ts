@@ -9,7 +9,6 @@ import { Group } from './entities/group.entity';
 import { Item } from './entities/item.entity';
 import { Movement } from './entities/movement.entity';
 
-// Reads .env when running outside Docker; in Docker the values come from compose.
 config({ quiet: true });
 
 @Module({
@@ -18,9 +17,6 @@ config({ quiet: true });
       type: 'postgres',
       url: process.env.DATABASE_URL,
       entities: [Group, Item, Movement],
-      // TypeORM creates the schema from the entities above, so the entity file
-      // is the single source of truth and there are no migrations to keep in
-      // step with it. `docker compose down -v` rebuilds everything from zero.
       synchronize: true,
       logging: ['error'],
     }),

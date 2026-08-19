@@ -5,10 +5,6 @@ import { Movement } from '../entities/movement.entity';
 import { CreateMovementDto, FindMovementsDto } from './movement.dto';
 import { MovementsService } from './movements.service';
 
-/**
- * Append-only: no PUT, PATCH or DELETE. Rewriting a ledger entry would break
- * the guarantee that stock equals the sum of its movements.
- */
 @ApiTags('Movements')
 @Controller('movements')
 export class MovementsController {
