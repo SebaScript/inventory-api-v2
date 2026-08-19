@@ -1,15 +1,10 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 
 /**
- * Business-rule failures, expressed as HTTP exceptions.
+ * Business failures as HTTP exceptions. Extending Nest's classes means throwing
+ * one *is* the status code — there is no translation layer.
  *
- * NestJS already maps its exception classes to status codes, so extending them
- * means there is no translation layer to write or explain: throwing
- * `InsufficientStockException` produces a 409 with our payload, and that is the
- * whole mechanism.
- *
- * The `code` field is what clients should branch on — messages are for humans
- * and may change.
+ * Clients branch on `code`; messages are for humans and may change.
  */
 
 export class GroupNotFoundException extends NotFoundException {
@@ -42,6 +37,15 @@ export class DuplicateNameException extends ConflictException {
 export class DuplicateSkuException extends ConflictException {
   constructor(sku: string) {
     super({ code: 'SKU_TAKEN', message: `An item with SKU "${sku}" already exists` });
+  }
+}
+
+export class ItemDiscontinuedException extends ConflictException {
+  constructor(id: number) {
+    super({
+      code: 'ITEM_DISCONTINUED',
+      message: `Item ${id} is discontinued and cannot receive movements`,
+    });
   }
 }
 

@@ -16,11 +16,9 @@ export enum MovementType {
 }
 
 /**
- * An append-only ledger entry.
- *
- * There is no update or delete: rewriting history would break the guarantee
- * that an item's stock equals the sum of its movements. Mistakes are corrected
- * by recording an opposite movement.
+ * Append-only ledger entry. No update or delete: rewriting history would break
+ * the guarantee that stock equals the sum of its movements. Mistakes are fixed
+ * with an opposite movement.
  */
 @Entity('movements')
 export class Movement {

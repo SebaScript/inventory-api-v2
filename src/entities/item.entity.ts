@@ -11,12 +11,15 @@ import {
 import { numericColumn } from '../common/pagination';
 import { Group } from './group.entity';
 
+export enum ItemStatus {
+  ACTIVE = 'ACTIVE',
+  DISCONTINUED = 'DISCONTINUED',
+}
+
 /**
- * A stock keeping unit.
- *
- * `quantity` is derived: it is only ever written inside the transaction that
- * records a Movement, never through the item endpoints. That is what keeps the
- * stock and the ledger in agreement.
+ * `quantity` is derived: written only inside the transaction that records a
+ * Movement. Items are never physically deleted — DELETE marks them
+ * DISCONTINUED so their history stays auditable.
  */
 @Entity('items')
 export class Item {
@@ -31,10 +34,6 @@ export class Item {
   @ApiProperty({ example: 'USB-C Cable' })
   @Column({ length: 120 })
   name: string;
-
-  @ApiProperty({ example: 'Braided 2m cable', nullable: true })
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  description: string | null;
 
   @ApiProperty({ example: 'ELEC-USBC-2M', description: 'Unique, stored uppercase' })
   @Column({ length: 40, unique: true })
@@ -58,6 +57,10 @@ export class Item {
     transformer: numericColumn,
   })
   unitPrice: number;
+
+  @ApiProperty({ enum: ItemStatus, example: ItemStatus.ACTIVE })
+  @Column({ type: 'enum', enum: ItemStatus, enumName: 'item_status', default: ItemStatus.ACTIVE })
+  status: ItemStatus;
 
   @ApiProperty()
   @CreateDateColumn({ name: 'created_at' })
