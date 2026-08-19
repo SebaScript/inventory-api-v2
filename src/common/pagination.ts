@@ -39,11 +39,7 @@ export class Paginated<T> {
   }
 }
 
-/**
- * `numeric` columns come back from the pg driver as strings, because they can
- * hold values outside what a JS number represents exactly. Prices here are
- * bounded, so converting is safe and keeps the JSON free of quoted numbers.
- */
+/** `numeric` arrives from the pg driver as a string; convert so JSON has numbers. */
 export const numericColumn = {
   to: (value: number) => value,
   from: (value: string | null) => (value === null ? null : Number(value)),
