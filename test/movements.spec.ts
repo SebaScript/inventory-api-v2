@@ -189,5 +189,15 @@ describe('Movements and the inventory rule', () => {
         await api[verb]('/movements/1').send({ quantity: 1 }).expect(404);
       },
     );
+
+    it('keeps the history when the item is discontinued', async () => {
+      const before = (await api.get('/movements?itemId=1').expect(200)).body.meta.total;
+
+      await api.delete('/items/1').expect(204);
+
+      const after = await api.get('/movements?itemId=1').expect(200);
+      expect(after.body.meta.total).toBe(before);
+      expect((await api.get('/items/1').expect(200)).body.status).toBe('DISCONTINUED');
+    });
   });
 });

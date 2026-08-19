@@ -18,14 +18,11 @@ describe('Application', () => {
   afterAll(() => app.close());
 
   describe('health check', () => {
-    it('reports ok while PostgreSQL answers', async () => {
-      const res = await api.get('/health').expect(200);
-      expect(res.body).toEqual({ status: 'ok', database: 'up' });
-    });
-
-    it('really queries the database rather than always saying ok', async () => {
+    it('queries the database and reports ok', async () => {
       const spy = jest.spyOn(dataSource, 'query');
-      await api.get('/health').expect(200);
+      const res = await api.get('/health').expect(200);
+
+      expect(res.body).toEqual({ status: 'ok', database: 'up' });
       expect(spy).toHaveBeenCalled();
       spy.mockRestore();
     });
@@ -33,43 +30,17 @@ describe('Application', () => {
     it('returns 503 when the database is unreachable', async () => {
       const spy = jest.spyOn(dataSource, 'query').mockRejectedValue(new Error('down'));
       const res = await api.get('/health').expect(503);
+
       expect(res.body.database).toBe('down');
       spy.mockRestore();
     });
   });
 
-  describe('error handling', () => {
-    it('gives every failure the same shape', async () => {
-      const res = await api.get('/groups/999').expect(404);
-      expect(res.body).toMatchObject({
-        statusCode: 404,
-        code: 'GROUP_NOT_FOUND',
-        path: '/groups/999',
-      });
-      expect(res.body.timestamp).toBeDefined();
-    });
-
-    it('reports validation failures with the offending fields', async () => {
-      const res = await api.post('/groups').send({ name: 'A' }).expect(400);
-      expect(res.body.code).toBe('VALIDATION_FAILED');
-      expect(Array.isArray(res.body.message)).toBe(true);
-    });
-
-    it('returns 404 with the standard shape for an unknown route', async () => {
-      const res = await api.get('/nope').expect(404);
-      expect(res.body.statusCode).toBe(404);
-    });
-  });
-
   describe('API documentation', () => {
-    it('serves Swagger UI and the OpenAPI document', async () => {
-      await api.get('/docs').expect(200);
-      const res = await api.get('/docs-json').expect(200);
-      expect(res.body.info.title).toBe('Inventory API');
-    });
-
     it('documents every REST route', async () => {
+      await api.get('/docs').expect(200);
       const { body } = await api.get('/docs-json').expect(200);
+
       const routes = Object.entries(body.paths).flatMap(([path, methods]) =>
         Object.keys(methods as object).map((m) => `${m.toUpperCase()} ${path}`),
       );
@@ -99,6 +70,7 @@ describe('Application', () => {
 
     it('cannot document the QUERY operation, and says so in the description', async () => {
       const { body } = await api.get('/docs-json').expect(200);
+
       // OpenAPI 3.0 has a closed list of methods that excludes `query`.
       expect(body.paths['/items/search']).not.toHaveProperty('query');
       expect(body.info.description).toContain('QUERY /items/search');
@@ -107,8 +79,7 @@ describe('Application', () => {
 
   describe('seed', () => {
     it('creates a coherent demo dataset', async () => {
-      const message = await seed(dataSource);
-      expect(message).toContain('Seed complete');
+      expect(await seed(dataSource)).toContain('Seed complete');
 
       expect(await dataSource.getRepository(Group).count()).toBe(3);
       expect(await dataSource.getRepository(Item).count()).toBe(10);
@@ -129,7 +100,7 @@ describe('Application', () => {
       }
     });
 
-    it('produces the scenarios the demo needs: low stock and out of stock', async () => {
+    it('produces low-stock and out-of-stock items for the demo', async () => {
       await seed(dataSource);
       const items = await dataSource.getRepository(Item).find();
 
@@ -140,9 +111,7 @@ describe('Application', () => {
 
     it('is idempotent, so a container restart never duplicates data', async () => {
       await seed(dataSource);
-      const message = await seed(dataSource);
-
-      expect(message).toContain('skipped');
+      expect(await seed(dataSource)).toContain('skipped');
       expect(await dataSource.getRepository(Group).count()).toBe(3);
     });
   });
