@@ -3,16 +3,16 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsEnum,
   IsInt,
   IsNumber,
   IsOptional,
   IsString,
   Length,
-  Max,
-  MaxLength,
   Min,
 } from 'class-validator';
 import { PaginationDto } from '../common/pagination';
+import { ItemStatus } from '../entities/item.entity';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 const upper = ({ value }: { value: unknown }) =>
@@ -30,23 +30,13 @@ export class CreateItemDto {
   @Length(2, 120)
   name: string;
 
-  @ApiPropertyOptional({ example: 'Braided 2m cable' })
-  @Transform(trim)
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  description?: string;
-
-  @ApiPropertyOptional({ example: 'ELEC-USBC-2M', description: 'Normalised to uppercase' })
+  @ApiPropertyOptional({ example: 'ELEC-USBC-2M' })
   @Transform(upper)
   @IsString()
   @Length(2, 40)
   sku: string;
 
-  @ApiPropertyOptional({
-    example: 0,
-    description: 'Opening stock. Recorded as an IN movement so the ledger explains it.',
-  })
+  @ApiPropertyOptional({ example: 0, description: 'Opening stock, recorded as an IN movement' })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -65,19 +55,29 @@ export class CreateItemDto {
   unitPrice?: number;
 }
 
-/**
- * `quantity` is excluded on purpose: stock belongs to the movements ledger.
- * Sending it returns 400 and points the caller at POST /movements.
- */
+/** `quantity` is excluded: stock belongs to the movements ledger. */
 export class ReplaceItemDto extends OmitType(CreateItemDto, ['quantity'] as const) {}
-export class UpdateItemDto extends PartialType(ReplaceItemDto) {}
+
+export class UpdateItemDto extends PartialType(ReplaceItemDto) {
+  /** Lets a discontinued item be brought back into service. */
+  @ApiPropertyOptional({ enum: ItemStatus })
+  @IsOptional()
+  @IsEnum(ItemStatus)
+  status?: ItemStatus;
+}
+
+/** `ALL` includes discontinued items; listings default to active only. */
+export enum StatusFilter {
+  ACTIVE = 'ACTIVE',
+  DISCONTINUED = 'DISCONTINUED',
+  ALL = 'ALL',
+}
 
 export class FindItemsDto extends PaginationDto {
   @ApiPropertyOptional({ example: 'usb', description: 'Matches name or SKU' })
   @Transform(trim)
   @IsOptional()
   @IsString()
-  @MaxLength(120)
   search?: string;
 
   @ApiPropertyOptional({ example: 1 })
@@ -92,22 +92,25 @@ export class FindItemsDto extends PaginationDto {
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   lowStock?: boolean;
+
+  @ApiPropertyOptional({ enum: StatusFilter, default: StatusFilter.ACTIVE })
+  @IsOptional()
+  @IsEnum(StatusFilter)
+  status?: StatusFilter;
 }
 
 /**
  * Body of `QUERY /items/search`.
  *
- * This nested shape is exactly why the endpoint uses the QUERY verb: a list of
- * group ids plus two ranges does not fit a query string without inventing an
- * encoding for arrays, and it hits URL length limits. QUERY is safe and
- * idempotent like GET but carries a body, so it is the correct method.
+ * The nested shape — a list of group ids plus a price range — is why this
+ * endpoint uses QUERY: it does not fit a query string without inventing an
+ * encoding for arrays.
  */
 export class SearchItemsDto extends PaginationDto {
   @ApiPropertyOptional({ example: 'usb' })
   @Transform(trim)
   @IsOptional()
   @IsString()
-  @MaxLength(120)
   text?: string;
 
   @ApiPropertyOptional({ example: [1, 3], type: [Number] })
@@ -129,11 +132,5 @@ export class SearchItemsDto extends PaginationDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  @Max(99_999_999)
   maxPrice?: number;
-
-  @ApiPropertyOptional({ example: false })
-  @IsOptional()
-  @IsBoolean()
-  lowStockOnly?: boolean;
 }

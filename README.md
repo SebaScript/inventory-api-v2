@@ -117,12 +117,12 @@ Each module is four files: **DTO → service → controller → module**. Servic
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/items` | Optional opening stock → recorded as an `IN` movement |
-| `GET` | `/items` | `?search`, `?groupId`, `?lowStock` |
+| `GET` | `/items` | `?search`, `?groupId`, `?lowStock`, `?status` |
 | **`QUERY`** | **`/items/search`** | Advanced search — see below |
 | `POST` | `/items/search` | Identical alias for clients without QUERY |
 | `GET` | `/items/:id` | |
 | `PUT` / `PATCH` | `/items/:id` | `quantity` is rejected with `400` |
-| `DELETE` | `/items/:id` | Deletes its movements too |
+| `DELETE` | `/items/:id` | **Discontinues** it — nothing is erased |
 
 ### Movements — `/movements`
 
@@ -133,6 +133,21 @@ Each module is four files: **DTO → service → controller → module**. Servic
 | `GET` | `/movements/:id` | |
 
 There is deliberately no `PUT`, `PATCH` or `DELETE`: the ledger is append-only. Corrections are made with an opposite movement.
+
+### Discontinuing an item
+
+`DELETE /items/:id` does **not** erase anything. It marks the item `DISCONTINUED`, which means "no longer available to operate on":
+
+| | |
+|---|---|
+| Its movement history | **kept** — that is the whole point |
+| Listings and `QUERY /items/search` | hidden (ask with `?status=DISCONTINUED` or `?status=ALL`) |
+| `GET /items/:id` | still returns it, so the audit trail is readable |
+| New movements | rejected with `409 ITEM_DISCONTINUED` |
+| Its SKU | stays reserved, so history stays unambiguous |
+| Reactivating | `PATCH /items/:id {"status":"ACTIVE"}` |
+
+A group can only be deleted while it has no items at all, discontinued ones included — otherwise their history would lose its category.
 
 ### Errors
 
@@ -213,8 +228,10 @@ Three tables. `movement_type` is a PostgreSQL enum, not a table.
 
 ```
 groups ──1:N──> items ──1:N──> movements
-       RESTRICT        CASCADE
+       RESTRICT        RESTRICT
 ```
+
+Nothing is ever physically deleted below the group level. `DELETE /items/:id` sets `status = DISCONTINUED`, which is what keeps the audit trail intact.
 
 | Rule | Why |
 |---|---|
@@ -223,7 +240,7 @@ groups ──1:N──> items ──1:N──> movements
 | `CHECK (quantity >= 0)` | The invariant's last line of defence |
 | `CHECK (quantity > 0)` on movements | Direction comes from `type`, never from a sign |
 | `ON DELETE RESTRICT` groups → items | Deleting a category must not destroy inventory |
-| `ON DELETE CASCADE` items → movements | No ledger rows pointing at a deleted item |
+| `ON DELETE RESTRICT` items → movements | A movement can never be orphaned; history is permanent |
 
 `synchronize` is **false everywhere**: the schema only ever changes through a reviewed migration.
 

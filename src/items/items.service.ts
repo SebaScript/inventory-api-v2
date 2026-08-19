@@ -8,13 +8,14 @@ import {
 } from '../common/exceptions';
 import { Paginated } from '../common/pagination';
 import { Group } from '../entities/group.entity';
-import { Item } from '../entities/item.entity';
+import { Item, ItemStatus } from '../entities/item.entity';
 import { Movement, MovementType } from '../entities/movement.entity';
 import {
   CreateItemDto,
   FindItemsDto,
   ReplaceItemDto,
   SearchItemsDto,
+  StatusFilter,
   UpdateItemDto,
 } from './item.dto';
 
@@ -26,11 +27,7 @@ export class ItemsService {
     private readonly dataSource: DataSource,
   ) {}
 
-  /**
-   * Opening stock is written as an IN movement in the same transaction, so an
-   * item's stock is always explained by its ledger — there is never a starting
-   * balance that came from nowhere.
-   */
+  /** Opening stock becomes an IN movement, so the ledger explains every unit. */
   async create(dto: CreateItemDto): Promise<Item> {
     await this.assertGroupExists(dto.groupId);
     await this.assertSkuIsFree(dto.sku);
@@ -58,6 +55,10 @@ export class ItemsService {
   async findAll(query: FindItemsDto): Promise<Paginated<Item>> {
     const qb = this.items.createQueryBuilder('item').leftJoinAndSelect('item.group', 'group');
 
+    // Listings show active items unless asked otherwise.
+    const status = query.status ?? StatusFilter.ACTIVE;
+    if (status !== StatusFilter.ALL) qb.andWhere('item.status = :status', { status });
+
     if (query.search) {
       qb.andWhere('(item.name ILIKE :s OR item.sku ILIKE :s)', { s: `%${query.search}%` });
     }
@@ -69,7 +70,10 @@ export class ItemsService {
 
   /** Backing query for `QUERY /items/search`. */
   async search(dto: SearchItemsDto): Promise<Paginated<Item>> {
-    const qb = this.items.createQueryBuilder('item').leftJoinAndSelect('item.group', 'group');
+    const qb = this.items
+      .createQueryBuilder('item')
+      .leftJoinAndSelect('item.group', 'group')
+      .where('item.status = :status', { status: ItemStatus.ACTIVE });
 
     if (dto.text) {
       qb.andWhere('(item.name ILIKE :t OR item.sku ILIKE :t)', { t: `%${dto.text}%` });
@@ -77,18 +81,18 @@ export class ItemsService {
     if (dto.groupIds?.length) qb.andWhere({ groupId: In(dto.groupIds) });
     if (dto.minPrice !== undefined) qb.andWhere('item.unitPrice >= :min', { min: dto.minPrice });
     if (dto.maxPrice !== undefined) qb.andWhere('item.unitPrice <= :max', { max: dto.maxPrice });
-    if (dto.lowStockOnly) qb.andWhere('item.quantity <= item.minimumStock');
 
     return this.paginate(qb, dto.page, dto.limit);
   }
 
+  /** Discontinued items are still readable, so their history stays auditable. */
   async findOne(id: number): Promise<Item> {
     const item = await this.items.findOne({ where: { id }, relations: { group: true } });
     if (!item) throw new ItemNotFoundException(id);
     return item;
   }
 
-  /** PUT — replaces every client-owned field. Stock is not one of them. */
+  /** PUT replaces every client-owned field; stock and status are not among them. */
   async replace(id: number, dto: ReplaceItemDto): Promise<Item> {
     await this.findOne(id);
     await this.assertGroupExists(dto.groupId);
@@ -96,7 +100,6 @@ export class ItemsService {
 
     await this.items.update(id, {
       ...dto,
-      description: dto.description ?? null,
       minimumStock: dto.minimumStock ?? 0,
       unitPrice: dto.unitPrice ?? 0,
     });
@@ -112,10 +115,10 @@ export class ItemsService {
     return this.findOne(id);
   }
 
-  /** Movements cascade with the item; orphan ledger rows would be worse. */
-  async remove(id: number): Promise<void> {
+  /** DELETE means "withdrawn from service", not "erased". History is kept. */
+  async discontinue(id: number): Promise<void> {
     await this.findOne(id);
-    await this.items.delete(id);
+    await this.items.update(id, { status: ItemStatus.DISCONTINUED });
   }
 
   private async paginate(
@@ -135,6 +138,7 @@ export class ItemsService {
     if (!(await this.groups.existsBy({ id: groupId }))) throw new GroupNotFoundException(groupId);
   }
 
+  /** A discontinued item keeps its SKU reserved, so its history stays unambiguous. */
   private async assertSkuIsFree(sku: string, exceptId?: number): Promise<void> {
     const clash = await this.items.findOneBy({
       sku: sku.toUpperCase(),

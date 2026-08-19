@@ -40,4 +40,5 @@ Thumbs.db
 
 # Local-only deliverable: full Spanish walkthrough of the project.
 # Deliberately excluded from the repository.
-EXPLICACION-PROYECTO.md
+# Local study material in Spanish; the repo documentation is the README.
+docs/

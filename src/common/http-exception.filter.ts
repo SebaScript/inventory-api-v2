@@ -15,12 +15,9 @@ const FOREIGN_KEY_VIOLATION = '23503';
 const CHECK_VIOLATION = '23514';
 
 /**
- * Gives every failure the same JSON shape and keeps internals out of responses.
- *
- * Two jobs, and only two:
- *  1. One response shape, so clients parse errors the same way everywhere.
- *  2. Nothing sensitive leaks — an unexpected error becomes a generic 500 while
- *     the real message and stack go to the server log.
+ * Two jobs: give every failure the same JSON shape, and keep internals out of
+ * production responses (an unexpected error becomes a generic 500; the real
+ * message goes to the log).
  */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -63,8 +60,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         return { status, code: this.codeFor(status), message: payload };
       }
 
-      // `statusCode` and `error` are Nest's own fields; this response sets its
-      // own, so they are dropped instead of being duplicated.
+      // Nest's own statusCode/error are dropped; this response sets its own.
       const { code, message, statusCode, error, ...extra } = payload as Record<string, unknown>;
 
       return {
@@ -77,8 +73,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       };
     }
 
-    // A constraint violation is the database refusing bad data; that is a
-    // client problem, not a server fault, so it must not surface as a 500.
+    // A constraint violation is bad client data, not a server fault.
     if (exception instanceof QueryFailedError) {
       const driverCode = (exception.driverError as { code?: string })?.code;
 

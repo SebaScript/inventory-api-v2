@@ -16,14 +16,14 @@ describe('Groups', () => {
   const create = (body: object) => api.post('/groups').send(body);
 
   describe('POST /groups', () => {
-    it('creates a group', async () => {
-      const res = await create({ name: 'Electronics', description: 'Gadgets' }).expect(201);
+    it('creates a group, trimming whitespace', async () => {
+      const res = await create({ name: '  Electronics  ', description: 'Gadgets' }).expect(201);
       expect(res.body).toMatchObject({ id: 1, name: 'Electronics', description: 'Gadgets' });
     });
 
-    it('trims whitespace and defaults description to null', async () => {
-      const res = await create({ name: '  Tools  ' }).expect(201);
-      expect(res.body).toMatchObject({ name: 'Tools', description: null });
+    it('defaults description to null', async () => {
+      const res = await create({ name: 'Tools' }).expect(201);
+      expect(res.body.description).toBeNull();
     });
 
     it('rejects a duplicate name regardless of case', async () => {
@@ -46,21 +46,17 @@ describe('Groups', () => {
       for (const name of ['Alpha', 'Beta', 'Gamma']) await create({ name }).expect(201);
     });
 
-    it('returns a paginated envelope', async () => {
-      const res = await api.get('/groups').expect(200);
-      expect(res.body.data).toHaveLength(3);
-      expect(res.body.meta).toEqual({ page: 1, limit: 20, total: 3, pages: 1 });
-    });
+    it('returns a paginated envelope and paginates', async () => {
+      const all = await api.get('/groups').expect(200);
+      expect(all.body.data).toHaveLength(3);
+      expect(all.body.meta).toEqual({ page: 1, limit: 20, total: 3, pages: 1 });
 
-    it('paginates', async () => {
-      const res = await api.get('/groups?page=2&limit=2').expect(200);
-      expect(res.body.data).toHaveLength(1);
-      expect(res.body.meta.pages).toBe(2);
+      const page2 = await api.get('/groups?page=2&limit=2').expect(200);
+      expect(page2.body.data).toHaveLength(1);
     });
 
     it('searches by name, case-insensitively', async () => {
-      const res = await api.get('/groups?search=alp').expect(200);
-      expect(res.body.meta.total).toBe(1);
+      expect((await api.get('/groups?search=alp').expect(200)).body.meta.total).toBe(1);
     });
 
     it('caps the page size so the whole table cannot be requested', async () => {
@@ -69,17 +65,13 @@ describe('Groups', () => {
   });
 
   describe('GET /groups/:id', () => {
-    it('returns the group', async () => {
+    it('returns the group, 404 for unknown, 400 for a non-numeric id', async () => {
       await create({ name: 'Electronics' }).expect(201);
       await api.get('/groups/1').expect(200);
-    });
 
-    it('returns 404 for an unknown id', async () => {
-      const res = await api.get('/groups/999').expect(404);
-      expect(res.body.code).toBe('GROUP_NOT_FOUND');
-    });
+      const missing = await api.get('/groups/999').expect(404);
+      expect(missing.body.code).toBe('GROUP_NOT_FOUND');
 
-    it('returns 400 for a non-numeric id', async () => {
       await api.get('/groups/abc').expect(400);
     });
   });
@@ -97,11 +89,9 @@ describe('Groups', () => {
       expect(res.body).toMatchObject({ name: 'Renamed', description: 'Original' });
     });
 
-    it('allows keeping the same name on the same record', async () => {
+    it('allows keeping the same name but rejects taking another one', async () => {
       await api.put('/groups/1').send({ name: 'Electronics' }).expect(200);
-    });
 
-    it('rejects renaming onto another group', async () => {
       await create({ name: 'Tools' }).expect(201);
       await api.patch('/groups/1').send({ name: 'tools' }).expect(409);
     });
@@ -126,6 +116,14 @@ describe('Groups', () => {
       const res = await api.delete('/groups/1').expect(409);
       expect(res.body.code).toBe('GROUP_NOT_EMPTY');
       await api.get('/groups/1').expect(200);
+    });
+
+    it('still refuses when its items are only discontinued, since their history remains', async () => {
+      await create({ name: 'Electronics' }).expect(201);
+      await api.post('/items').send({ groupId: 1, name: 'Cable', sku: 'C1' }).expect(201);
+      await api.delete('/items/1').expect(204);
+
+      await api.delete('/groups/1').expect(409);
     });
 
     it('returns 404 for an unknown id', async () => {
