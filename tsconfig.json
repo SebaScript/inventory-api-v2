@@ -14,8 +14,6 @@
     "sourceMap": true,
 
     "strict": true,
-    // Entity and DTO fields are assigned by TypeORM and class-transformer, not
-    // by a constructor, so this check does not apply to them.
     "strictPropertyInitialization": false,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
