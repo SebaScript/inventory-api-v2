@@ -5,12 +5,9 @@ import { Movement, MovementType } from '../entities/movement.entity';
 import dataSource from './data-source';
 
 /**
- * Fixed demo data — no randomness, so every `docker compose up` produces the
- * same numbers and the README examples always match reality.
- *
- * Items are created empty and their stock is built up by applying the
- * movements, so the ledger explains the stock by construction rather than by
- * two hard-coded numbers that could drift apart.
+ * Fixed demo data, no randomness, so every run produces the same numbers.
+ * Items start empty and their stock is built by applying the movements, so the
+ * ledger explains it by construction.
  */
 const GROUPS = [
   { name: 'Electronics', description: 'Computer accessories' },

@@ -92,8 +92,14 @@ export class ItemsController {
 
   @Delete(':id')
   @HttpCode(204)
-  @ApiOperation({ summary: 'Delete an item and its movement history' })
-  remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    return this.service.remove(id);
+  @ApiOperation({
+    summary: 'Discontinue an item',
+    description:
+      'Does not erase anything: the item is marked DISCONTINUED so its movement ' +
+      'history stays auditable. It disappears from listings and accepts no new ' +
+      'movements. Reactivate with PATCH { "status": "ACTIVE" }.',
+  })
+  discontinue(@Param('id', ParseIntPipe) id: number): Promise<void> {
+    return this.service.discontinue(id);
   }
 }

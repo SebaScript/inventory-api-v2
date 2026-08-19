@@ -3,11 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import {
   InsufficientStockException,
+  ItemDiscontinuedException,
   ItemNotFoundException,
   MovementNotFoundException,
 } from '../common/exceptions';
 import { Paginated } from '../common/pagination';
-import { Item } from '../entities/item.entity';
+import { Item, ItemStatus } from '../entities/item.entity';
 import { Movement, MovementType } from '../entities/movement.entity';
 import { CreateMovementDto, FindMovementsDto } from './movement.dto';
 
@@ -19,16 +20,12 @@ export class MovementsService {
   ) {}
 
   /**
-   * The core operation of the system. Three things must hold at once:
-   *
-   * 1. Atomicity — the ledger entry and the new stock are written in one
-   *    transaction, so one can never exist without the other.
-   * 2. No negative stock — an OUT that would go below zero throws before
-   *    anything is written, so nothing is persisted at all.
-   * 3. Safe under concurrency — the item row is read with
-   *    `SELECT ... FOR UPDATE` (pessimistic_write). Without that lock two
-   *    simultaneous OUT requests would both read the same stock, both decide
-   *    they fit, and both commit, overselling the item.
+   * The core operation. Three guarantees at once:
+   *  1. Atomic — ledger entry and new stock are written in one transaction.
+   *  2. Never negative — an oversized OUT throws before anything is written.
+   *  3. Safe under concurrency — `SELECT ... FOR UPDATE` serialises writers.
+   *     Without the lock two simultaneous OUTs would both read the same stock,
+   *     both decide they fit, and both commit, overselling the item.
    */
   async create(dto: CreateMovementDto): Promise<Movement> {
     return this.dataSource.transaction(async (manager) => {
@@ -39,6 +36,7 @@ export class MovementsService {
         .getOne();
 
       if (!item) throw new ItemNotFoundException(dto.itemId);
+      if (item.status === ItemStatus.DISCONTINUED) throw new ItemDiscontinuedException(item.id);
 
       const resultingStock =
         dto.type === MovementType.IN ? item.quantity + dto.quantity : item.quantity - dto.quantity;
