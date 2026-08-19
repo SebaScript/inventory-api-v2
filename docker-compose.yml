@@ -1,14 +1,3 @@
-# One compose file for every environment.
-#
-# What makes the environments independent is the env file, not a separate
-# compose file: it sets COMPOSE_PROJECT_NAME (so Docker treats each as its own
-# stack, with its own containers, network and volume), the host port, and the
-# database credentials.
-#
-#   docker compose --env-file .env.test       up --build -d   # → :3100
-#   docker compose --env-file .env.production up --build -d   # → :3200
-#   docker compose up --build                                 # → :3000 (dev)
-
 services:
   postgres:
     image: postgres:18-alpine
@@ -17,12 +6,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-inventory}
       POSTGRES_DB: ${DB_NAME:-inventory}
     ports:
-      # Published so `npm test` can reach it from the host. Each environment
-      # uses a different port, so the three stacks never collide.
       - '${DB_PORT:-5432}:5432'
     volumes:
-      # PostgreSQL 18+ images keep data in a version-specific subdirectory, so
-      # the mount goes here and not on /var/lib/postgresql/data.
       - pgdata:/var/lib/postgresql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-inventory} -d ${DB_NAME:-inventory}']
@@ -39,7 +24,6 @@ services:
       SEED: ${SEED:-true}
     depends_on:
       postgres:
-        # The API never starts against a database that is not ready yet.
         condition: service_healthy
 
 volumes:
