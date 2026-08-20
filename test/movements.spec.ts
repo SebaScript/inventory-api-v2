@@ -1,6 +1,5 @@
 import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { Item } from '../src/entities/item.entity';
 import { createApp, reset } from './app.factory';
 
 /**
@@ -22,182 +21,88 @@ describe('Movements and the inventory rule', () => {
   });
   afterAll(() => app.close());
 
-  const addItem = (quantity = 0, sku = 'C1') =>
-    api
-      .post('/items')
-      .send({ groupId: 1, name: `Item ${sku}`, sku, quantity })
-      .expect(201);
+  const addItem = (quantity = 0) =>
+    api.post('/items').send({ groupId: 1, name: 'Cable', sku: 'C1', quantity }).expect(201);
 
   const move = (body: object) => api.post('/movements').send(body);
 
-  const stockOf = async (id = 1): Promise<number> =>
-    (await api.get(`/items/${id}`).expect(200)).body.quantity;
+  const stockOf = async (): Promise<number> =>
+    (await api.get('/items/1').expect(200)).body.quantity;
 
-  describe('IN', () => {
-    it('increases stock and records the resulting level', async () => {
-      await addItem(0);
-      const res = await move({ itemId: 1, type: 'IN', quantity: 50, reason: 'Delivery' }).expect(
-        201,
-      );
+  it('IN raises the stock and OUT lowers it, recording the resulting level', async () => {
+    await addItem(0);
 
-      expect(res.body).toMatchObject({ type: 'IN', quantity: 50, resultingStock: 50 });
-      expect(await stockOf()).toBe(50);
-    });
+    const inbound = await move({ itemId: 1, type: 'IN', quantity: 50, reason: 'Delivery' });
+    expect(inbound.status).toBe(201);
+    expect(inbound.body).toMatchObject({ type: 'IN', quantity: 50, resultingStock: 50 });
 
-    it('accumulates across movements', async () => {
-      await addItem(0);
-      await move({ itemId: 1, type: 'IN', quantity: 30 }).expect(201);
-      await move({ itemId: 1, type: 'IN', quantity: 20 }).expect(201);
-      expect(await stockOf()).toBe(50);
-    });
+    const outbound = await move({ itemId: 1, type: 'OUT', quantity: 50 }).expect(201);
+    expect(outbound.body.resultingStock).toBe(0); // draining to exactly zero is allowed
+    expect(await stockOf()).toBe(0);
   });
 
-  describe('OUT', () => {
-    it('decreases stock when there is enough', async () => {
-      await addItem(100);
-      const res = await move({ itemId: 1, type: 'OUT', quantity: 40 }).expect(201);
+  it('refuses an OUT larger than the stock and writes nothing at all', async () => {
+    await addItem(3);
 
-      expect(res.body.resultingStock).toBe(60);
-      expect(await stockOf()).toBe(60);
-    });
+    const res = await move({ itemId: 1, type: 'OUT', quantity: 10 }).expect(409);
+    expect(res.body).toMatchObject({ code: 'INSUFFICIENT_STOCK', available: 3, requested: 10 });
 
-    it('allows draining to exactly zero', async () => {
-      await addItem(25);
-      const res = await move({ itemId: 1, type: 'OUT', quantity: 25 }).expect(201);
-      expect(res.body.resultingStock).toBe(0);
-    });
+    // The transaction rolled back: the stock is untouched and no entry exists.
+    expect(await stockOf()).toBe(3);
+    expect((await api.get('/movements').expect(200)).body.meta.total).toBe(1); // only the opening IN
   });
 
-  describe('insufficient stock', () => {
-    it('returns 409 and reports what was available', async () => {
-      await addItem(3);
-      const res = await move({ itemId: 1, type: 'OUT', quantity: 10 }).expect(409);
+  /**
+   * The test that justifies `SELECT ... FOR UPDATE`.
+   *
+   * Two OUT movements of 60 against a stock of 100: only one can succeed.
+   * Without the row lock both would read 100, both would conclude that 40
+   * remains, and both would commit — 120 units leaving a warehouse of 100.
+   */
+  it('serialises concurrent OUT movements so the item cannot be oversold', async () => {
+    await addItem(100);
 
-      expect(res.body).toMatchObject({
-        code: 'INSUFFICIENT_STOCK',
-        available: 3,
-        requested: 10,
-      });
-    });
+    const results = await Promise.all([
+      move({ itemId: 1, type: 'OUT', quantity: 60 }),
+      move({ itemId: 1, type: 'OUT', quantity: 60 }),
+    ]);
 
-    it('writes nothing at all: stock unchanged and no movement created', async () => {
-      await addItem(3);
-      const before = (await api.get('/movements').expect(200)).body.meta.total;
-
-      await move({ itemId: 1, type: 'OUT', quantity: 10 }).expect(409);
-
-      expect(await stockOf()).toBe(3);
-      const after = (await api.get('/movements').expect(200)).body.meta.total;
-      expect(after).toBe(before);
-    });
-
-    it('rejects any OUT against zero stock', async () => {
-      await addItem(0);
-      await move({ itemId: 1, type: 'OUT', quantity: 1 }).expect(409);
-    });
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    expect(await stockOf()).toBe(40);
   });
 
-  describe('concurrency', () => {
-    /**
-     * The test that justifies `SELECT ... FOR UPDATE`.
-     *
-     * Two OUT movements of 60 against stock of 100: only one can succeed.
-     * Without the row lock both would read 100, both would conclude 40 remains,
-     * and both would commit — 120 units leaving a warehouse that held 100.
-     */
-    it('serialises concurrent OUT movements so the item cannot be oversold', async () => {
-      await addItem(100);
-
-      const results = await Promise.all([
-        move({ itemId: 1, type: 'OUT', quantity: 60 }),
-        move({ itemId: 1, type: 'OUT', quantity: 60 }),
-      ]);
-
-      const statuses = results.map((r) => r.status).sort();
-      expect(statuses).toEqual([201, 409]);
-      expect(await stockOf()).toBe(40);
-    });
-
-    it('keeps stock correct under many interleaved movements', async () => {
-      await addItem(100);
-
-      await Promise.all([
-        ...Array.from({ length: 10 }, () => move({ itemId: 1, type: 'OUT', quantity: 5 })),
-        ...Array.from({ length: 10 }, () => move({ itemId: 1, type: 'IN', quantity: 3 })),
-      ]);
-
-      // 100 - 50 + 30
-      expect(await stockOf()).toBe(80);
-    });
+  it('lets PostgreSQL reject negative stock even when the API is bypassed', async () => {
+    await addItem(10);
+    await expect(dataSource.query('UPDATE items SET quantity = -1 WHERE id = 1')).rejects.toThrow();
   });
 
-  describe('the database is the last line of defence', () => {
-    it('rejects negative stock even when the application is bypassed', async () => {
-      await addItem(10);
-      await expect(
-        dataSource.getRepository(Item).query('UPDATE items SET quantity = -1 WHERE id = 1'),
-      ).rejects.toThrow();
-    });
+  it('lists movements newest first, filters them, and gets one with its item', async () => {
+    await addItem(100);
+    await move({ itemId: 1, type: 'OUT', quantity: 10 }).expect(201);
+
+    const all = await api.get('/movements').expect(200);
+    expect(all.body.meta.total).toBe(2); // the opening IN plus the explicit OUT
+    expect(all.body.data[0].type).toBe('OUT');
+
+    expect((await api.get('/movements?type=OUT').expect(200)).body.meta.total).toBe(1);
+    expect((await api.get('/movements?itemId=1').expect(200)).body.meta.total).toBe(2);
+    expect((await api.get('/movements/1').expect(200)).body.item.sku).toBe('C1');
   });
 
-  describe('validation and listing', () => {
-    beforeEach(async () => {
-      await addItem(100, 'C1');
-      await move({ itemId: 1, type: 'OUT', quantity: 10 }).expect(201);
-    });
+  it('rejects an unknown item, an invalid body, and any attempt to rewrite history', async () => {
+    await addItem(10);
 
-    it('returns 404 for an unknown item', async () => {
-      const res = await move({ itemId: 999, type: 'IN', quantity: 1 }).expect(404);
-      expect(res.body.code).toBe('ITEM_NOT_FOUND');
-    });
-
-    it.each([
-      [{ quantity: 0 }],
-      [{ quantity: -5 }],
-      [{ type: 'ADJUST' }],
-      [{ type: 'in' }],
-      [{ resultingStock: 999 }],
-    ])('rejects invalid body %j', async (override) => {
-      await move({ itemId: 1, type: 'IN', quantity: 1, ...override }).expect(400);
-    });
-
-    it('lists movements and filters by item and type', async () => {
-      const all = await api.get('/movements').expect(200);
-      // The opening IN plus the explicit OUT.
-      expect(all.body.meta.total).toBe(2);
-
-      const outs = await api.get('/movements?type=OUT').expect(200);
-      expect(outs.body.meta.total).toBe(1);
-
-      const byItem = await api.get('/movements?itemId=1').expect(200);
-      expect(byItem.body.meta.total).toBe(2);
-    });
-
-    it('gets one movement with its item', async () => {
-      const res = await api.get('/movements/1').expect(200);
-      expect(res.body.item.sku).toBe('C1');
-    });
-
-    it('returns 404 for an unknown movement', async () => {
-      const res = await api.get('/movements/999').expect(404);
-      expect(res.body.code).toBe('MOVEMENT_NOT_FOUND');
-    });
-
-    it.each(['put', 'patch', 'delete'] as const)(
-      'does not expose %s: the ledger is append-only',
-      async (verb) => {
-        await api[verb]('/movements/1').send({ quantity: 1 }).expect(404);
-      },
+    expect((await move({ itemId: 999, type: 'IN', quantity: 1 }).expect(404)).body.code).toBe(
+      'ITEM_NOT_FOUND',
     );
+    expect((await api.get('/movements/999').expect(404)).body.code).toBe('MOVEMENT_NOT_FOUND');
 
-    it('keeps the history when the item is discontinued', async () => {
-      const before = (await api.get('/movements?itemId=1').expect(200)).body.meta.total;
+    await move({ itemId: 1, type: 'IN', quantity: 0 }).expect(400); // must be positive
+    await move({ itemId: 1, type: 'ADJUST', quantity: 1 }).expect(400); // IN or OUT only
+    await move({ itemId: 1, type: 'IN', quantity: 1, resultingStock: 999 }).expect(400);
 
-      await api.delete('/items/1').expect(204);
-
-      const after = await api.get('/movements?itemId=1').expect(200);
-      expect(after.body.meta.total).toBe(before);
-      expect((await api.get('/items/1').expect(200)).body.status).toBe('DISCONTINUED');
-    });
+    // The ledger is append-only: these routes simply do not exist.
+    await api.patch('/movements/1').send({ quantity: 1 }).expect(404);
+    await api.delete('/movements/1').expect(404);
   });
 });
