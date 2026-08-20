@@ -36,7 +36,6 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgres://${DB_USER:-inventory}:${DB_PASSWORD:-inventory}@postgres:5432/${DB_NAME:-inventory}
-      RUN_MIGRATIONS: 'true'
       SEED: ${SEED:-true}
     depends_on:
       postgres:

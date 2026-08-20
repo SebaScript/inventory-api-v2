@@ -20,7 +20,6 @@ const config: Config = {
     'src/**/*.ts',
     '!src/main.ts', // process entry point: wires up and calls listen()
     '!src/**/*.module.ts', // declarative wiring; a mistake fails every test
-    '!src/database/migrations/**', // proven by every test that needs the schema
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text-summary', 'json-summary', 'html'],
