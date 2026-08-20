@@ -32,13 +32,10 @@ export async function createApp(): Promise<{
   setupSwagger(app);
   await app.init();
 
-  const dataSource = app.get(DataSource);
-  await dataSource.runMigrations();
-
-  return { app, dataSource, api: request(app.getHttpServer()) };
+  return { app, dataSource: app.get(DataSource), api: request(app.getHttpServer()) };
 }
 
-/** Empties the tables and restarts the id sequences between test files. */
+/** Empties the tables and restarts the id sequences between tests. */
 export async function reset(dataSource: DataSource): Promise<void> {
   await dataSource.query('TRUNCATE movements, items, groups RESTART IDENTITY CASCADE');
 }

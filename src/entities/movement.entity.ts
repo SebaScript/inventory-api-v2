@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  Check,
   Column,
   CreateDateColumn,
   Entity,
@@ -21,6 +22,7 @@ export enum MovementType {
  * with an opposite movement.
  */
 @Entity('movements')
+@Check('quantity > 0 AND resulting_stock >= 0')
 export class Movement {
   @ApiProperty({ example: 1 })
   @PrimaryGeneratedColumn()
@@ -53,8 +55,9 @@ export class Movement {
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
+  // RESTRICT: a movement can never be orphaned, so history is permanent.
   @ApiProperty({ type: () => Item, required: false })
-  @ManyToOne(() => Item, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Item, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'item_id' })
   item?: Item;
 }

@@ -17,7 +17,7 @@ export class Group {
   id: number;
 
   @ApiProperty({ example: 'Electronics' })
-  @Column({ length: 80 })
+  @Column({ length: 80, unique: true })
   name: string;
 
   @ApiProperty({ example: 'Consumer electronics', nullable: true })
@@ -32,8 +32,6 @@ export class Group {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  // ON DELETE RESTRICT (set in the migration): deleting a category must never
-  // destroy the inventory inside it.
   @OneToMany(() => Item, (item) => item.group)
   items?: Item[];
 }

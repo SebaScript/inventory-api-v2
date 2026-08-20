@@ -22,16 +22,9 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new HttpExceptionFilter(isProduction));
   app.enableCors();
 
-  const dataSource = app.get(DataSource);
-
-  if (process.env.RUN_MIGRATIONS === 'true') {
-    const applied = await dataSource.runMigrations();
-    logger.log(applied.length ? `Applied ${applied.length} migration(s)` : 'Schema up to date');
-  }
-
   // Demo data must never reach production, whatever the variable says.
   if (process.env.SEED === 'true' && !isProduction) {
-    logger.log(await seed(dataSource));
+    logger.log(await seed(app.get(DataSource)));
   }
 
   setupSwagger(app);

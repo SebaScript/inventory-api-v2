@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  Check,
   Column,
   CreateDateColumn,
   Entity,
@@ -22,6 +23,8 @@ export enum ItemStatus {
  * DISCONTINUED so their history stays auditable.
  */
 @Entity('items')
+// The invariant's last line of defence, enforced by PostgreSQL itself.
+@Check('quantity >= 0')
 export class Item {
   @ApiProperty({ example: 1 })
   @PrimaryGeneratedColumn()
@@ -70,8 +73,9 @@ export class Item {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
+  // RESTRICT: deleting a category must never destroy the inventory inside it.
   @ApiProperty({ type: () => Group, required: false })
-  @ManyToOne(() => Group, (group) => group.items)
+  @ManyToOne(() => Group, (group) => group.items, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'group_id' })
   group?: Group;
 }
