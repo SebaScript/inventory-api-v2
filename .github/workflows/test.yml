@@ -8,7 +8,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Build and verify. Produces the artifact; deploys nothing.
   pipeline:
     runs-on: ubuntu-latest
 
@@ -57,8 +56,6 @@ jobs:
       - name: Build the Docker image
         run: docker build --build-arg GIT_SHA=${GITHUB_SHA} -t inventory-api:test .
 
-      # Two tags for one image: `test` is what a human pulls, the commit sha is
-      # the immutable reference the deployment pins itself to.
       - name: Publish the image to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -67,15 +64,6 @@ jobs:
           docker push ghcr.io/${GITHUB_REPOSITORY,,}:test
           docker push ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}
 
-  # The deployment itself: this is what updates the API that is running.
-  #
-  # Railway hosts the environment, so deploying is one command: tell Railway to
-  # pull the image this pipeline just published and roll it out. Nothing is
-  # built here — the environment runs the exact artifact that passed the gates.
-  #
-  # `needs: pipeline` is what makes the quality gates binding: if either gate
-  # fails, the job above fails and this one never starts. A pull request builds
-  # and publishes, but does not deploy.
   deploy:
     needs: pipeline
     if: github.event_name != 'pull_request'
@@ -88,8 +76,6 @@ jobs:
     steps:
       - name: Deploy the published image to Railway
         env:
-          # A Railway project token is scoped to one environment, so it selects
-          # the target on its own: there is no environment flag to get wrong.
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           set -euo pipefail
@@ -99,8 +85,6 @@ jobs:
           # without it Railway would redeploy the image it is already running.
           railway redeploy --service "${{ vars.RAILWAY_SERVICE }}" --yes --from-source
 
-      # Proof rather than assumption: every image is stamped with the commit it
-      # was built from, so the running service is asked what it is serving.
       - name: Verify the live service is serving this revision
         env:
           SERVICE_URL: ${{ vars.RAILWAY_SERVICE_URL }}
