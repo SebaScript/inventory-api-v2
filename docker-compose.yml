@@ -16,14 +16,8 @@ services:
       retries: 10
 
   api:
-    # Local development builds from source. The Test and Production env files
-    # set API_IMAGE to the tag the pipeline published, so those environments
-    # run exactly the artifact that cleared the quality gates.
     image: ${API_IMAGE:-inventory-api:dev}
     build: .
-    # An environment behaves like a server: it comes back on its own after a
-    # reboot or a Docker restart, and only stays down if it was stopped on
-    # purpose. Deployments do not depend on someone having started it first.
     restart: unless-stopped
     ports:
       - '${API_PORT:-3000}:3000'

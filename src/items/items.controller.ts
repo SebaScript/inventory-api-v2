@@ -35,16 +35,6 @@ export class ItemsController {
     return this.service.findAll(query);
   }
 
-  // `search` must come before `:id` — Express matches in declaration order, so
-  // otherwise ParseIntPipe would reject "search" with a confusing 400.
-
-  /**
-   * Advanced search over the HTTP **QUERY** verb: safe and idempotent like GET,
-   * but with a request body. NestJS 11 supports it natively via @QueryMethod.
-   *
-   * Hidden from Swagger because OpenAPI 3.0 has a closed list of methods that
-   * does not include `query`; the POST alias below exists for that reason.
-   */
   @QueryMethod('search')
   @ApiExcludeEndpoint()
   search(@Body() dto: SearchItemsDto): Promise<Paginated<Item>> {
