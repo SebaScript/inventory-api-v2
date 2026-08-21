@@ -16,6 +16,12 @@ jobs:
   pipeline:
     runs-on: ubuntu-latest
 
+    # Publishing the image to GHCR needs write access to packages, which the
+    # default GITHUB_TOKEN does not have. Everything else stays read-only.
+    permissions:
+      contents: read
+      packages: write
+
     services:
       # Real PostgreSQL: the tests assert on transactions, row locks and CHECK
       # constraints, none of which can be faked.
@@ -59,7 +65,10 @@ jobs:
       - name: Build the Docker image
         run: docker build -t inventory-api:test .
 
+      # A pull request is a check, not a release: it runs every step above
+      # but publishes nothing.
       - name: Deploy to Test
+        if: github.event_name == 'push'
         run: |
           echo "Publishing image for the Test environment"
           docker tag inventory-api:test ghcr.io/${GITHUB_REPOSITORY,,}:test
