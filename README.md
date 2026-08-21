@@ -178,9 +178,38 @@ Test Pipeline (develop)        Production Pipeline (main)
   install                        install
   lint                           lint
   build                          build
-  test + coverage >= 60%   ←→    test + coverage >= 85%
+  gate 1: 0 failing tests   ←→   gate 1: 0 failing tests
+  gate 2: coverage >= 60%   ←→   gate 2: coverage >= 85%
   docker build                   docker build
   deploy to Test                 deploy to Production
 ```
 
-Both run the suite against a real PostgreSQL service container. `COVERAGE_MIN` is the only difference in the gate: `60` in one file, `85` in the other.
+Both run the suite against a real PostgreSQL service container. `COVERAGE_MIN` is the only difference between the two files: `60` in one, `85` in the other.
+
+### The two quality gates
+
+Each one is its own step, so the pipeline log says which rule stopped it.
+
+| Gate | Step | Enforced by | Fails when |
+|---|---|---|---|
+| **0 failing tests** | `npm test` | Jest's exit code | any test fails — or no tests are found at all, so the gate cannot be passed by deleting the suite |
+| **Coverage** | `npm run test:cov` | Jest's `coverageThreshold` | any metric is below `COVERAGE_MIN` |
+
+Both were verified by making them fail on purpose:
+
+```bash
+# a single failing test
+$ npm test
+Tests: 1 failed, 28 passed, 29 total          -> exit 1
+
+# no tests at all
+$ npm test
+No tests found, exiting with code 1           -> exit 1
+
+# coverage below the bar
+$ COVERAGE_MIN=99 npm run test:cov
+Jest: Coverage for branches (90.51%) does not
+      meet "global" threshold (99%)           -> exit 1
+```
+
+A step that exits non-zero ends the job, and `Deploy` is the last step — so neither gate can be missed and still reach a deployment. There is no `|| true`, no `continue-on-error` and no ignored exit code anywhere.
