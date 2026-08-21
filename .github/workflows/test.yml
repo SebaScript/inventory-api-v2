@@ -1,9 +1,3 @@
-# Test pipeline — guards the `develop` branch.
-#
-#   install -> lint -> build -> tests -> coverage >= 60% -> deploy Test
-#
-# Each step runs in order and the job stops at the first failure, so a red test
-# or a missed coverage bar makes the deploy step unreachable.
 name: Test Pipeline
 
 on:
@@ -16,15 +10,11 @@ jobs:
   pipeline:
     runs-on: ubuntu-latest
 
-    # Publishing the image to GHCR needs write access to packages, which the
-    # default GITHUB_TOKEN does not have. Everything else stays read-only.
     permissions:
       contents: read
       packages: write
 
     services:
-      # Real PostgreSQL: the tests assert on transactions, row locks and CHECK
-      # constraints, none of which can be faked.
       postgres:
         image: postgres:18-alpine
         env:
@@ -37,7 +27,6 @@ jobs:
 
     env:
       DATABASE_URL: postgres://inventory:inventory@localhost:5432/inventory_test
-      # The Test environment's quality bar.
       COVERAGE_MIN: 60
 
     steps:
@@ -57,16 +46,20 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Jest exits non-zero on a failing test AND on missed coverage, so this
-      # single step is both the test run and the quality gate.
-      - name: Test and coverage gate (>= 60%)
+      # Quality gate 1 - the rubric allows zero failing tests. Jest exits
+      # non-zero if a single test fails, and also if it finds no tests at all,
+      # so the gate cannot be passed by deleting the suite.
+      - name: Quality gate 1 - automated tests (0 failures allowed)
+        run: npm test
+
+      # Quality gate 2 - the coverage bar for this environment. COVERAGE_MIN
+      # feeds Jest's coverageThreshold, and missing it exits non-zero as well.
+      - name: Quality gate 2 - coverage (>= 60%)
         run: npm run test:cov
 
       - name: Build the Docker image
         run: docker build -t inventory-api:test .
 
-      # A pull request is a check, not a release: it runs every step above
-      # but publishes nothing.
       - name: Deploy to Test
         if: github.event_name == 'push'
         run: |

@@ -56,9 +56,15 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Jest exits non-zero on a failing test AND on missed coverage, so this
-      # single step is both the test run and the quality gate.
-      - name: Test and coverage gate (>= 85%)
+      # Quality gate 1 - the rubric allows zero failing tests. Jest exits
+      # non-zero if a single test fails, and also if it finds no tests at all,
+      # so the gate cannot be passed by deleting the suite.
+      - name: Quality gate 1 - automated tests (0 failures allowed)
+        run: npm test
+
+      # Quality gate 2 - the coverage bar for this environment. COVERAGE_MIN
+      # feeds Jest's coverageThreshold, and missing it exits non-zero as well.
+      - name: Quality gate 2 - coverage (>= 85%)
         run: npm run test:cov
 
       - name: Build the Docker image
