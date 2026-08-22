@@ -173,16 +173,55 @@ Jest exits non-zero when a test fails **or** coverage falls short. That non-zero
 
 Two GitHub Actions pipelines, one job each, steps in order. A step that fails ends the job, so the deploy step is simply never reached.
 
+Each pipeline is two jobs: one builds and verifies, the other deploys.
+
 ```
-Test Pipeline (develop)        Production Pipeline (main)
-  install                        install
-  lint                           lint
-  build                          build
-  gate 1: 0 failing tests   ←→   gate 1: 0 failing tests
-  gate 2: coverage >= 60%   ←→   gate 2: coverage >= 85%
-  docker build                   docker build
-  deploy to Test                 deploy to Production
+job: pipeline  (GitHub runner)        job: deploy  (self-hosted runner)
+  install                               needs: pipeline
+  lint                                  |
+  build                                 pull the published image
+  gate 1: 0 failing tests               restart the stack with it
+  gate 2: coverage >= 60% / 85%         verify /health answers
+  docker build                          verify the running image is that one
+  publish the image to GHCR  ──────────►
 ```
+
+`needs: pipeline` is what makes the gates binding: if either gate fails the
+first job fails, and the deploy job never starts.
+
+### Why the deploy job runs on a self-hosted runner
+
+The Test and Production stacks run on a host GitHub cannot reach, so the host
+reaches out instead: a self-hosted runner registered on that machine picks up
+the deploy job, pulls the tag the pipeline just published, and restarts the
+stack with it.
+
+Nothing is ever built on the host. The environment runs the exact image that
+cleared the quality gates — `docker-compose.yml` takes the tag from `API_IMAGE`:
+
+```yaml
+  api:
+    image: ${API_IMAGE:-inventory-api:dev}   # :test / :prod in each env file
+    build: .                                  # only local development builds
+```
+
+The last step proves the deployment actually happened, rather than assuming it:
+
+```bash
+expected=$(docker image inspect --format '{{.Id}}' ghcr.io/…:prod)
+running=$(docker inspect --format '{{.Image}}' "$(docker compose … ps -q api)")
+test "$expected" = "$running"
+```
+
+If the restart silently kept the old container, the digests differ and the
+deployment fails instead of reporting a success it did not achieve.
+
+### Where the secrets live
+
+Each environment is a **GitHub Environment** (`test`, `production`) holding its
+own `ENV_FILE` secret with that environment's ports, database name, credentials
+and image tag. The repository contains only the `.env.*.example` templates. The
+deploy job writes the file, uses it, and deletes it.
 
 Both run the suite against a real PostgreSQL service container. `COVERAGE_MIN` is the only difference between the two files: `60` in one, `85` in the other.
 

@@ -7,6 +7,7 @@ on:
     branches: [develop, main]
 
 jobs:
+  # Build and verify. Produces the artifact; deploys nothing.
   pipeline:
     runs-on: ubuntu-latest
 
@@ -55,9 +56,72 @@ jobs:
       - name: Build the Docker image
         run: docker build -t inventory-api:test .
 
-      - name: Deploy to Test
+      - name: Publish the image to GHCR
         run: |
-          echo "Publishing image for the Test environment"
           docker tag inventory-api:test ghcr.io/${GITHUB_REPOSITORY,,}:test
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker push ghcr.io/${GITHUB_REPOSITORY,,}:test
+
+  # The deployment itself: this is what updates the API that is running.
+  #
+  # It runs on a self-hosted runner because that machine is the Test host.
+  # GitHub cannot reach into it, so the runner reaches out, pulls the image the
+  # job above published, and restarts the stack with it. Nothing is ever built
+  # here — the server runs the exact artifact that passed the gates.
+  #
+  # `needs: pipeline` is what makes the gates binding: if either gate fails,
+  # the job above fails and this one never starts. A pull request builds and
+  # publishes, but does not deploy.
+  deploy:
+    needs: pipeline
+    if: github.event_name == 'push'
+    runs-on: self-hosted
+
+    # The environment holds its own secrets, and GitHub records a deployment
+    # against it on every run.
+    environment:
+      name: test
+      url: http://localhost:3100
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write the environment configuration
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          echo "$ENV_FILE" > .env.test
+          if [ ! -s .env.test ]; then
+            echo "::error::The test environment has no ENV_FILE secret configured."
+            exit 1
+          fi
+
+      - name: Pull the published image and restart the stack
+        run: |
+          docker compose --env-file .env.test pull api
+          docker compose --env-file .env.test up -d --no-build
+
+      - name: Verify the environment is serving the new image
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:3100/health > /dev/null; then break; fi
+            sleep 2
+          done
+          curl -fs http://localhost:3100/health
+          echo
+
+          # The running container must be the image that was just pulled, not a
+          # leftover from an earlier deployment.
+          expected=$(docker image inspect --format '{{.Id}}' ghcr.io/${GITHUB_REPOSITORY,,}:test)
+          running=$(docker inspect --format '{{.Image}}' "$(docker compose --env-file .env.test ps -q api)")
+          echo "expected: $expected"
+          echo "running:  $running"
+          test "$expected" = "$running"
+
+      - name: Remove the environment file from the workspace
+        if: always()
+        run: rm -f .env.test
