@@ -81,9 +81,12 @@ jobs:
       name: production
       url: http://localhost:3200
 
+    # PowerShell, not bash: on a Windows runner `bash` resolves to the WSL stub
+    # in WindowsApps, while Git Bash sits outside PATH. PowerShell is always
+    # present and needs no machine-specific setup.
     defaults:
       run:
-        shell: bash
+        shell: powershell
 
     steps:
       - uses: actions/checkout@v4
@@ -92,34 +95,52 @@ jobs:
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
         run: |
-          echo "$ENV_FILE" > .env.production
-          if [ ! -s .env.production ]; then
-            echo "::error::The production environment has no ENV_FILE secret configured."
+          if ([string]::IsNullOrWhiteSpace($env:ENV_FILE)) {
+            Write-Output "::error::The production environment has no ENV_FILE secret configured."
             exit 1
-          fi
+          }
+          # LF endings and no byte-order mark, or Compose reads stray characters
+          # into the values.
+          $text = $env:ENV_FILE -replace "`r`n", "`n"
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText("$PWD\.env.production", $text, $utf8)
 
       - name: Pull the published image and restart the stack
         run: |
           docker compose --env-file .env.production pull api
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           docker compose --env-file .env.production up -d --no-build
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Verify the environment is serving the new image
         run: |
-          for i in $(seq 1 30); do
-            if curl -fs http://localhost:3200/health > /dev/null; then break; fi
-            sleep 2
-          done
-          curl -fs http://localhost:3200/health
-          echo
+          $healthy = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            try {
+              $r = Invoke-RestMethod http://localhost:3200/health -TimeoutSec 5
+              if ($r.status -eq 'ok') { $healthy = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $healthy) {
+            Write-Output "::error::The Production API never became healthy after the restart."
+            exit 1
+          }
+          Write-Output "health: ok"
 
           # The running container must be the image that was just pulled, not a
           # leftover from an earlier deployment.
-          expected=$(docker image inspect --format '{{.Id}}' ghcr.io/${GITHUB_REPOSITORY,,}:prod)
-          running=$(docker inspect --format '{{.Image}}' "$(docker compose --env-file .env.production ps -q api)")
-          echo "expected: $expected"
-          echo "running:  $running"
-          test "$expected" = "$running"
+          $expected = (docker image inspect --format '{{.Id}}' ghcr.io/sebascript/inventory-api-v2:prod | Select-Object -First 1)
+          $cid = (docker compose --env-file .env.production ps -q api | Select-Object -First 1)
+          $running = (docker inspect --format '{{.Image}}' $cid | Select-Object -First 1)
+          Write-Output "expected: $expected"
+          Write-Output "running:  $running"
+          if ($expected -ne $running) {
+            Write-Output "::error::The running container is not the image that was just published."
+            exit 1
+          }
 
       - name: Remove the environment file from the workspace
         if: always()
-        run: rm -f .env.production
+        run: |
+          if (Test-Path .env.production) { Remove-Item .env.production -Force }
