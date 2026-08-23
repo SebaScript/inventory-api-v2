@@ -5,6 +5,7 @@ on:
     branches: [develop]
   pull_request:
     branches: [develop, main]
+  workflow_dispatch:
 
 jobs:
   # Build and verify. Produces the artifact; deploys nothing.
@@ -74,7 +75,7 @@ jobs:
   # publishes, but does not deploy.
   deploy:
     needs: pipeline
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: self-hosted
 
     # The environment holds its own secrets, and GitHub records a deployment
@@ -125,7 +126,8 @@ jobs:
             Start-Sleep -Seconds 2
           }
           if (-not $healthy) {
-            Write-Output "::error::The Test API never became healthy after the restart."
+            Write-Output "::error::The Test API never became healthy after the restart. Container log follows."
+            docker compose --env-file .env.test logs api --tail 40
             exit 1
           }
           Write-Output "health: ok"
