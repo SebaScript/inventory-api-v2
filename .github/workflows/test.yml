@@ -134,15 +134,16 @@ jobs:
 
           # The running container must be the image that was just pulled, not a
           # leftover from an earlier deployment.
-          $expected = (docker image inspect --format '{{.Id}}' ghcr.io/sebascript/inventory-api-v2:test | Select-Object -First 1)
-          $cid = (docker compose --env-file .env.test ps -q api | Select-Object -First 1)
-          $running = (docker inspect --format '{{.Image}}' $cid | Select-Object -First 1)
+          $expected = @(docker image inspect --format '{{.Id}}' ghcr.io/sebascript/inventory-api-v2:test)[0]
+          $cid = @(docker compose --env-file .env.test ps -q api)[0]
+          $running = @(docker inspect --format '{{.Image}}' $cid)[0]
           Write-Output "expected: $expected"
           Write-Output "running:  $running"
           if ($expected -ne $running) {
             Write-Output "::error::The running container is not the image that was just published."
             exit 1
           }
+          exit 0
 
       - name: Remove the environment file from the workspace
         if: always()
