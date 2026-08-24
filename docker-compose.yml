@@ -15,6 +15,10 @@ services:
       retries: 10
 
   api:
+    # Local development builds from source. The Test and Production env files
+    # set API_IMAGE to the tag the pipeline published, so those environments
+    # run exactly the artifact that cleared the quality gates.
+    image: ${API_IMAGE:-inventory-api:dev}
     build: .
     ports:
       - '${API_PORT:-3000}:3000'

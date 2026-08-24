@@ -5,8 +5,10 @@ on:
     branches: [develop]
   pull_request:
     branches: [develop, main]
+  workflow_dispatch:
 
 jobs:
+  # Build and verify. Produces the artifact; deploys nothing.
   pipeline:
     runs-on: ubuntu-latest
 
@@ -46,24 +48,104 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Quality gate 1 - the rubric allows zero failing tests. Jest exits
-      # non-zero if a single test fails, and also if it finds no tests at all,
-      # so the gate cannot be passed by deleting the suite.
-      - name: Quality gate 1 - automated tests (0 failures allowed)
+      - name: Quality gate 1 - automated tests (0 failures)
         run: npm test
 
-      # Quality gate 2 - the coverage bar for this environment. COVERAGE_MIN
-      # feeds Jest's coverageThreshold, and missing it exits non-zero as well.
-      - name: Quality gate 2 - coverage (>= 60%)
+      - name: Quality gate 2 - coverage >= 60%
         run: npm run test:cov
 
       - name: Build the Docker image
         run: docker build -t inventory-api:test .
 
-      - name: Deploy to Test
-        if: github.event_name == 'push'
+      - name: Publish the image to GHCR
         run: |
-          echo "Publishing image for the Test environment"
           docker tag inventory-api:test ghcr.io/${GITHUB_REPOSITORY,,}:test
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker push ghcr.io/${GITHUB_REPOSITORY,,}:test
+
+  # The deployment itself: this is what updates the API that is running.
+  #
+  # It runs on a self-hosted runner because that machine is the Test host.
+  # GitHub cannot reach into it, so the runner reaches out, pulls the image the
+  # job above published, and restarts the stack with it. Nothing is ever built
+  # here — the server runs the exact artifact that passed the gates.
+  #
+  # `needs: pipeline` is what makes the gates binding: if either gate fails,
+  # the job above fails and this one never starts. A pull request builds and
+  # publishes, but does not deploy.
+  deploy:
+    needs: pipeline
+    if: github.event_name != 'pull_request'
+    runs-on: self-hosted
+
+    # The environment holds its own secrets, and GitHub records a deployment
+    # against it on every run.
+    environment:
+      name: test
+      url: http://localhost:3100
+
+    # PowerShell, not bash: on a Windows runner `bash` resolves to the WSL stub
+    # in WindowsApps, while Git Bash sits outside PATH. PowerShell is always
+    # present and needs no machine-specific setup.
+    defaults:
+      run:
+        shell: powershell
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write the environment configuration
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:ENV_FILE)) {
+            Write-Output "::error::The test environment has no ENV_FILE secret configured."
+            exit 1
+          }
+          # LF endings and no byte-order mark, or Compose reads stray characters
+          # into the values.
+          $text = $env:ENV_FILE -replace "`r`n", "`n"
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText("$PWD\.env.test", $text, $utf8)
+
+      - name: Pull the published image and restart the stack
+        run: |
+          docker compose --env-file .env.test pull api
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          docker compose --env-file .env.test up -d --no-build
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Verify the environment is serving the new image
+        run: |
+          $healthy = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            try {
+              $r = Invoke-RestMethod http://localhost:3100/health -TimeoutSec 5
+              if ($r.status -eq 'ok') { $healthy = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $healthy) {
+            Write-Output "::error::The Test API never became healthy after the restart. Container log follows."
+            docker compose --env-file .env.test logs api --tail 40
+            exit 1
+          }
+          Write-Output "health: ok"
+
+          # The running container must be the image that was just pulled, not a
+          # leftover from an earlier deployment.
+          $expected = @(docker image inspect --format '{{.Id}}' ghcr.io/sebascript/inventory-api-v2:test)[0]
+          $cid = @(docker compose --env-file .env.test ps -q api)[0]
+          $running = @(docker inspect --format '{{.Image}}' $cid)[0]
+          Write-Output "expected: $expected"
+          Write-Output "running:  $running"
+          if ($expected -ne $running) {
+            Write-Output "::error::The running container is not the image that was just published."
+            exit 1
+          }
+          exit 0
+
+      - name: Remove the environment file from the workspace
+        if: always()
+        run: |
+          if (Test-Path .env.test) { Remove-Item .env.test -Force }

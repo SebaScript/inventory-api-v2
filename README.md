@@ -171,18 +171,79 @@ Jest exits non-zero when a test fails **or** coverage falls short. That non-zero
 
 ## CI/CD
 
-Two GitHub Actions pipelines, one job each, steps in order. A step that fails ends the job, so the deploy step is simply never reached.
+Two GitHub Actions pipelines. Each is two jobs: one builds and verifies, the other deploys.
 
 ```
-Test Pipeline (develop)        Production Pipeline (main)
-  install                        install
-  lint                           lint
-  build                          build
-  gate 1: 0 failing tests   ←→   gate 1: 0 failing tests
-  gate 2: coverage >= 60%   ←→   gate 2: coverage >= 85%
-  docker build                   docker build
-  deploy to Test                 deploy to Production
+job: pipeline  (GitHub runner)        job: deploy  (self-hosted runner)
+  install                               needs: pipeline
+  lint                                  |
+  build                                 pull the published image
+  gate 1: 0 failing tests               restart the stack with it
+  gate 2: coverage >= 60% / 85%         verify /health answers
+  docker build                          verify the running image is that one
+  publish the image to GHCR  ──────────►
 ```
+
+`needs: pipeline` is what makes the gates binding: if either gate fails the
+first job fails, and the deploy job never starts.
+
+### Why the deploy job runs on a self-hosted runner
+
+The Test and Production stacks run on a host GitHub cannot reach, so the host
+reaches out instead: a self-hosted runner registered on that machine picks up
+the deploy job, pulls the tag the pipeline just published, and restarts the
+stack with it.
+
+Nothing is ever built on the host. The environment runs the exact image that
+cleared the quality gates — `docker-compose.yml` takes the tag from `API_IMAGE`:
+
+```yaml
+  api:
+    image: ${API_IMAGE:-inventory-api:dev}   # :test / :prod in each env file
+    build: .                                  # only local development builds
+```
+
+The last step proves the deployment actually happened, rather than assuming it:
+
+```powershell
+$expected = docker image inspect --format '{{.Id}}' ghcr.io/…:prod
+$cid      = docker compose --env-file .env.production ps -q api
+$running  = docker inspect --format '{{.Image}}' $cid
+if ($expected -ne $running) { exit 1 }
+```
+
+If the restart silently kept the old container, the digests differ and the
+deployment fails instead of reporting a success it did not achieve.
+
+### Where the secrets live
+
+Each environment is a **GitHub Environment** (`test`, `production`) holding its
+own `ENV_FILE` secret with that environment's ports, database name, credentials
+and image tag. The repository contains only the `.env.*.example` templates. The
+deploy job writes the file, uses it, and deletes it.
+
+### Reproducing the deployment host
+
+The deploy job needs a machine that runs the environments and a runner
+registered on it:
+
+1. **Register the runner** — repository *Settings → Actions → Runners → New
+   self-hosted runner*, then run the commands GitHub shows. Answer **N** to
+   "run as service": Docker Desktop exposes its daemon per user, and a service
+   running as `NETWORK SERVICE` cannot reach it. Start it with `run.cmd`.
+2. **Create the environments** — *Settings → Environments*, one named `test`
+   and one named `production`, each with an `ENV_FILE` secret holding that
+   environment's configuration (the `.env.*.example` files are the template,
+   plus the `API_IMAGE` line).
+
+The deploy steps are written in PowerShell rather than bash: on a Windows
+runner `bash` resolves to the WSL launcher stub, while Git Bash sits outside
+`PATH`.
+
+> PostgreSQL only applies `POSTGRES_PASSWORD` when it initialises an empty data
+> directory. If an environment's volume already exists, `DB_PASSWORD` in the
+> secret must match the password that volume was created with — otherwise the
+> API starts, fails to authenticate, and the deployment is rejected.
 
 Both run the suite against a real PostgreSQL service container. `COVERAGE_MIN` is the only difference between the two files: `60` in one, `85` in the other.
 
