@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "23b83a5a-ee7f-4b15-a478-069462ae34e8",
+    "_postman_id": "c74e2592-e69e-47ca-8250-6000e0cdfffa",
     "name": "Inventory API",
     "description": "Inventory API - Group -> Item -> Movement.\n\nPick an environment first: Local (:3000), Test (:3100) or Production (:3200).\n\nThe folders run in order and each one leaves behind the ids the next one uses, so \"Run collection\" exercises the whole API end to end and every test should pass.\n\nFolder 5 sends requests that are meant to fail - that is where the business rules become visible.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -373,7 +373,7 @@
             "description": "Creates a product. The optional opening stock is written as an IN movement, so even the first units have a ledger entry. The SKU is stored uppercase.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"name\": \"Postman Cable\",\n  \"sku\": \"PM-{{$timestamp}}\",\n  \"quantity\": 100,\n  \"minimumStock\": 20,\n  \"unitPrice\": 12.5\n}",
+              "raw": "{\n  \"groupId\": {{groupId}},\n  \"name\": \"Postman Cable\",\n  \"sku\": \"PM-{{$timestamp}}\",\n  \"quantity\": 100,\n  \"minimumStock\": 20,\n  \"unitPrice\": 12.5\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -551,7 +551,7 @@
             "description": "THE HTTP QUERY VERB: safe and idempotent like GET, but it carries a request body.\n\nIt is used here because the filter holds a LIST of category ids plus a price range - something a query string cannot carry without inventing an encoding for arrays.\n\nIf your Postman build cannot send QUERY, use the POST alias below: same body, same response.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"text\": \"postman\",\n  \"groupIds\": [\n    \"{{groupId}}\"\n  ],\n  \"minPrice\": 0,\n  \"maxPrice\": 1000,\n  \"page\": 1,\n  \"limit\": 20\n}",
+              "raw": "{\n  \"text\": \"postman\",\n  \"groupIds\": [\n    {{groupId}}\n  ],\n  \"minPrice\": 0,\n  \"maxPrice\": 1000,\n  \"page\": 1,\n  \"limit\": 20\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -595,7 +595,7 @@
             "description": "Exists only because Swagger UI and some proxies cannot emit QUERY. The canonical verb is QUERY, and a test asserts both return exactly the same thing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"text\": \"postman\",\n  \"groupIds\": [\n    \"{{groupId}}\"\n  ],\n  \"minPrice\": 0,\n  \"maxPrice\": 1000\n}",
+              "raw": "{\n  \"text\": \"postman\",\n  \"groupIds\": [\n    {{groupId}}\n  ],\n  \"minPrice\": 0,\n  \"maxPrice\": 1000\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -711,7 +711,7 @@
             "description": "Replaces the editable fields. The stock is NOT one of them: it survives untouched.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"name\": \"Postman Cable replaced\",\n  \"sku\": \"{{itemSku}}\"\n}",
+              "raw": "{\n  \"groupId\": {{groupId}},\n  \"name\": \"Postman Cable replaced\",\n  \"sku\": \"{{itemSku}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -760,7 +760,7 @@
             "description": "Writes the ledger entry AND the new stock in one transaction, with the item row locked so concurrent requests cannot oversell.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"itemId\": \"{{itemId}}\",\n  \"type\": \"IN\",\n  \"quantity\": 50,\n  \"reason\": \"Supplier delivery\"\n}",
+              "raw": "{\n  \"itemId\": {{itemId}},\n  \"type\": \"IN\",\n  \"quantity\": 50,\n  \"reason\": \"Supplier delivery\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -803,7 +803,7 @@
             "description": "The same transaction in the opposite direction. The quantity is always positive; the direction comes from type.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"itemId\": \"{{itemId}}\",\n  \"type\": \"OUT\",\n  \"quantity\": 30,\n  \"reason\": \"Sales order SO-1001\"\n}",
+              "raw": "{\n  \"itemId\": {{itemId}},\n  \"type\": \"OUT\",\n  \"quantity\": 30,\n  \"reason\": \"Sales order SO-1001\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -955,7 +955,7 @@
             "description": "THE CENTRAL RULE: stock can never go negative. The transaction rolls back, so no movement is written and the stock is untouched. The error carries available and requested so the client can react.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"itemId\": \"{{itemId}}\",\n  \"type\": \"OUT\",\n  \"quantity\": 999999\n}",
+              "raw": "{\n  \"itemId\": {{itemId}},\n  \"type\": \"OUT\",\n  \"quantity\": 999999\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1043,7 +1043,7 @@
             "description": "SKUs are unique. The comparison is case-insensitive because the SKU is stored uppercase.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"name\": \"Duplicate attempt\",\n  \"sku\": \"{{itemSku}}\"\n}",
+              "raw": "{\n  \"groupId\": {{groupId}},\n  \"name\": \"Duplicate attempt\",\n  \"sku\": \"{{itemSku}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1334,7 +1334,7 @@
             "description": "It can no longer be operated on.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"itemId\": \"{{itemId}}\",\n  \"type\": \"IN\",\n  \"quantity\": 5\n}",
+              "raw": "{\n  \"itemId\": {{itemId}},\n  \"type\": \"IN\",\n  \"quantity\": 5\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1377,7 +1377,7 @@
             "description": "If another product reused it, the old movements would become ambiguous.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"name\": \"Trying to reuse the SKU\",\n  \"sku\": \"{{itemSku}}\"\n}",
+              "raw": "{\n  \"groupId\": {{groupId}},\n  \"name\": \"Trying to reuse the SKU\",\n  \"sku\": \"{{itemSku}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
