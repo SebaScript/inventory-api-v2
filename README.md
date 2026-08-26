@@ -64,14 +64,6 @@ A movement is an entry or exit of stock. It is the **immutable event log** that 
 |---|---|---|
 | `GET` | `/health` | Runs a real query against PostgreSQL. `503` if the database is unreachable. Docker uses it as the container `HEALTHCHECK` |
 
-### Postman
-
-`postman/` holds a collection covering every endpoint, plus one environment per
-deployment. Import the four files, pick an environment, and **Run collection**:
-the folders run in order and each request carries tests, so a green run means
-the API behaved. Folder 5 sends requests that are meant to fail — that is where
-the business rules are visible. See `postman/README.md`.
-
 ### Errors
 
 Every failure has the same shape. Branch on `code`, not on `message`.
