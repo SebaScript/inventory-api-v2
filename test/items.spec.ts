@@ -83,21 +83,25 @@ describe('Items', () => {
     expect(viaPost.body).toEqual(viaQuery.body);
   });
 
-  it('PUT replaces and PATCH merges, and neither lets the client set the stock', async () => {
+  it('PATCH changes only what was sent, and never the stock', async () => {
     await create({ name: 'Cable', sku: 'C1', quantity: 50, minimumStock: 5 }).expect(201);
 
-    const replaced = await api
-      .put('/items/1')
-      .send({ groupId: 1, name: 'New', sku: 'C1' })
-      .expect(200);
-    expect(replaced.body).toMatchObject({ name: 'New', minimumStock: 0, quantity: 50 });
-
-    const patched = await api.patch('/items/1').send({ unitPrice: 9.5 }).expect(200);
-    expect(patched.body).toMatchObject({ name: 'New', unitPrice: 9.5 });
+    const patched = await api.patch('/items/1').send({ name: 'New', unitPrice: 9.5 }).expect(200);
+    expect(patched.body).toMatchObject({
+      name: 'New',
+      unitPrice: 9.5,
+      minimumStock: 5,
+      quantity: 50,
+    });
 
     // Stock belongs to the ledger, so the field is not on the DTO at all.
     const rejected = await api.patch('/items/1').send({ quantity: 999 }).expect(400);
     expect(JSON.stringify(rejected.body.message)).toContain('quantity');
+
+    // A field that is sent is validated as strictly as it is on creation.
+    await api.patch('/items/1').send({ groupId: 999 }).expect(404);
+    await create({ name: 'Other', sku: 'C2' }).expect(201);
+    await api.patch('/items/2').send({ sku: 'c1' }).expect(409);
   });
 
   it('discontinues on DELETE, keeping the item and its whole history', async () => {
@@ -134,7 +138,6 @@ describe('Items', () => {
 
   it('returns 404 for an unknown item on every route', async () => {
     await api.get('/items/999').expect(404);
-    await api.put('/items/999').send({ groupId: 1, name: 'Nope', sku: 'Z1' }).expect(404);
     await api.patch('/items/999').send({ name: 'Nope' }).expect(404);
     await api.delete('/items/999').expect(404);
   });

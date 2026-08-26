@@ -8,7 +8,7 @@ In Postman, **Import** and drop in these four files:
 
 | File | What it is |
 |---|---|
-| `inventory-api.postman_collection.json` | The collection: 38 requests in 7 folders |
+| `inventory-api.postman_collection.json` | The collection: 36 requests in 7 folders |
 | `local.postman_environment.json` | Local development — `http://localhost:3000` |
 | `test.postman_environment.json` | Test environment — `http://localhost:3100` |
 | `production.postman_environment.json` | Production environment — `http://localhost:3200` |
@@ -25,7 +25,7 @@ and a full run should finish with no failures.
 | Folder | What it shows |
 |---|---|
 | 1. Health | The service and its database are reachable |
-| 2. Groups | CRUD, and the difference between PUT (replaces) and PATCH (merges) |
+| 2. Groups | CRUD, with PATCH as the single update verb |
 | 3. Items | CRUD, filters, and **the QUERY verb** with its POST alias |
 | 4. Movements | IN and OUT, the transaction, the ledger |
 | 5. Business rules | Requests that fail **on purpose** — this is where the domain rules show |

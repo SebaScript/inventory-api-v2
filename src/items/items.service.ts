@@ -13,7 +13,6 @@ import { Movement, MovementType } from '../entities/movement.entity';
 import {
   CreateItemDto,
   FindItemsDto,
-  ReplaceItemDto,
   SearchItemsDto,
   StatusFilter,
   UpdateItemDto,
@@ -90,20 +89,6 @@ export class ItemsService {
     const item = await this.items.findOne({ where: { id }, relations: { group: true } });
     if (!item) throw new ItemNotFoundException(id);
     return item;
-  }
-
-  /** PUT replaces every client-owned field; stock and status are not among them. */
-  async replace(id: number, dto: ReplaceItemDto): Promise<Item> {
-    await this.findOne(id);
-    await this.assertGroupExists(dto.groupId);
-    await this.assertSkuIsFree(dto.sku, id);
-
-    await this.items.update(id, {
-      ...dto,
-      minimumStock: dto.minimumStock ?? 0,
-      unitPrice: dto.unitPrice ?? 0,
-    });
-    return this.findOne(id);
   }
 
   async update(id: number, dto: UpdateItemDto): Promise<Item> {

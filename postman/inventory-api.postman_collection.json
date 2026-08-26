@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "c74e2592-e69e-47ca-8250-6000e0cdfffa",
+    "_postman_id": "372684c1-8f01-44a2-8665-40a6eb271856",
     "name": "Inventory API",
     "description": "Inventory API - Group -> Item -> Movement.\n\nPick an environment first: Local (:3000), Test (:3100) or Production (:3200).\n\nThe folders run in order and each one leaves behind the ids the next one uses, so \"Run collection\" exercises the whole API end to end and every test should pass.\n\nFolder 5 sends requests that are meant to fail - that is where the business rules become visible.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -258,7 +258,7 @@
           ]
         },
         {
-          "name": "PATCH /groups/:id - merges",
+          "name": "PATCH /groups/:id - update",
           "request": {
             "method": "PATCH",
             "header": [
@@ -277,7 +277,7 @@
                 "{{groupId}}"
               ]
             },
-            "description": "Only the fields sent change. The name is kept.",
+            "description": "Updates only the fields that were sent. The name is untouched because it was not in the body. This is the only update verb the API exposes: there is no PUT.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"description\": \"Updated with PATCH\"\n}",
@@ -296,50 +296,6 @@
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
                   "pm.test(\"description changed\", () => pm.expect(pm.response.json().description).to.eql(\"Updated with PATCH\"));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PUT /groups/:id - replaces",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/groups/{{groupId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "groups",
-                "{{groupId}}"
-              ]
-            },
-            "description": "Replaces the resource: the omitted description is CLEARED. That is the difference with PATCH.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Postman Category renamed {{$timestamp}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"description cleared\", () => pm.expect(pm.response.json().description).to.eql(null));"
                 ]
               }
             }
@@ -645,7 +601,7 @@
           ]
         },
         {
-          "name": "PATCH /items/:id - merges",
+          "name": "PATCH /items/:id - update",
           "request": {
             "method": "PATCH",
             "header": [
@@ -664,10 +620,10 @@
                 "{{itemId}}"
               ]
             },
-            "description": "Only what is sent changes. Note that quantity is not accepted here.",
+            "description": "Updates only the fields that were sent. The stock is never one of them - it is owned by the ledger - and quantity is not even on the DTO.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"unitPrice\": 19.99\n}",
+              "raw": "{\n  \"name\": \"Postman Cable renamed\",\n  \"unitPrice\": 19.99\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -682,51 +638,10 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"price changed\", () => pm.expect(pm.response.json().unitPrice).to.eql(19.99));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PUT /items/:id - replaces",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/items/{{itemId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "items",
-                "{{itemId}}"
-              ]
-            },
-            "description": "Replaces the editable fields. The stock is NOT one of them: it survives untouched.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"groupId\": {{groupId}},\n  \"name\": \"Postman Cable replaced\",\n  \"sku\": \"{{itemSku}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"stock preserved\", () => pm.expect(pm.response.json().quantity).to.eql(100));"
+                  "const b = pm.response.json();",
+                  "pm.test(\"price changed\", () => pm.expect(b.unitPrice).to.eql(19.99));",
+                  "pm.test(\"stock untouched\", () => pm.expect(b.quantity).to.eql(100));",
+                  "pm.test(\"minimumStock kept\", () => pm.expect(b.minimumStock).to.eql(20));"
                 ]
               }
             }

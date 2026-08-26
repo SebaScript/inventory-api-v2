@@ -56,9 +56,7 @@ export class CreateItemDto {
 }
 
 /** `quantity` is excluded: stock belongs to the movements ledger. */
-export class ReplaceItemDto extends OmitType(CreateItemDto, ['quantity'] as const) {}
-
-export class UpdateItemDto extends PartialType(ReplaceItemDto) {
+export class UpdateItemDto extends PartialType(OmitType(CreateItemDto, ['quantity'] as const)) {
   /** Lets a discontinued item be brought back into service. */
   @ApiPropertyOptional({ enum: ItemStatus })
   @IsOptional()

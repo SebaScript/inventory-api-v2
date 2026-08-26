@@ -39,15 +39,7 @@ export class GroupsService {
     return group;
   }
 
-  /** PUT — replaces the resource, so an omitted description is cleared. */
-  async replace(id: number, dto: CreateGroupDto): Promise<Group> {
-    await this.findOne(id);
-    await this.assertNameIsFree(dto.name, id);
-    await this.groups.update(id, { name: dto.name, description: dto.description ?? null });
-    return this.findOne(id);
-  }
-
-  /** PATCH — merges, so an omitted description is kept. */
+  /** Only the fields present in the body change. */
   async update(id: number, dto: UpdateGroupDto): Promise<Group> {
     await this.findOne(id);
     if (dto.name) await this.assertNameIsFree(dto.name, id);
