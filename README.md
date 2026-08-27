@@ -2,7 +2,7 @@
 
 RESTful inventory API with NestJS + TypeScript + PostgreSQL, containerised with Docker and guarded by two CI/CD pipelines with coverage gates.
 
-The Test and Production environments are deployed on **Render**, each from the
+The Test and Production environments are deployed on **Railway**, each from the
 image its pipeline published. Everything below runs locally with Docker alone:
 
 ```bash
@@ -14,10 +14,10 @@ npm run docker:dev    # http://localhost:3000  ·  /docs  ·  /health
 
 | | Local | Test | Production |
 |---|---|---|---|
-| Runs on | Docker on your machine | Render | Render |
-| API | `http://localhost:3000` | its own Render URL | its own Render URL |
+| Runs on | Docker on your machine | Railway | Railway |
+| API | `http://localhost:3000` | its own Railway URL | its own Railway URL |
 | Database | container, `inventory_dev` | its own managed PostgreSQL | its own managed PostgreSQL |
-| Configuration | `.env` | env vars on the Render service | env vars on the Render service |
+| Configuration | `.env` | variables on the Railway service | variables on the Railway service |
 | Demo data | yes | yes | never |
 | Updated by | you | Test Pipeline (`develop`) | Production Pipeline (`main`) |
 
@@ -121,15 +121,16 @@ In production an unexpected error returns only `"Internal server error"`. A test
 
 ## Environments
 
-Test and Production are two **Render web services**, each running the image its
-own pipeline published, and each bound to its own managed PostgreSQL. They share
-nothing:
+Test and Production are two **Railway environments** inside one project. Each
+runs the image its own pipeline published, bound to its own PostgreSQL. They
+share nothing, and Railway keeps them isolated by design — a change in one
+environment cannot touch the other:
 
 | | Test | Production |
 |---|---|---|
-| URL | its own `*.onrender.com` host | its own `*.onrender.com` host |
-| Database | its own instance | its own instance |
-| Configuration | env vars on that service | env vars on that service |
+| URL | its own `*.up.railway.app` host | its own `*.up.railway.app` host |
+| Database | its own PostgreSQL service | its own PostgreSQL service |
+| Configuration | variables on that environment | variables on that environment |
 | Image tag | `:test` | `:prod` |
 | Deployed from | `develop` | `main` |
 | Demo data | `SEED=true` | `SEED=false` |
@@ -138,9 +139,12 @@ Production starts with an empty inventory, and the guard is not only that flag:
 the application refuses to seed whenever `NODE_ENV=production`, even if `SEED`
 were set to true.
 
-Neither service builds anything. Render pulls the image the pipeline published,
-pinned to the exact commit, so what runs in an environment is byte for byte what
-cleared the quality gates.
+Neither environment builds anything. Railway pulls the image the pipeline
+published, so what runs is byte for byte what cleared the quality gates.
+
+The database password is never written down: the service reads
+`DATABASE_URL=${{Postgres.DATABASE_URL}}`, a reference Railway resolves to the
+PostgreSQL service of that same environment.
 
 ### Running an environment locally
 
@@ -197,15 +201,15 @@ Jest exits non-zero when a test fails **or** coverage falls short. That non-zero
 ## CI/CD
 
 Two GitHub Actions pipelines. Each is two jobs: one builds and verifies, the
-other deploys to Render.
+other deploys to Railway.
 
 ```
 job: pipeline                     ->    job: deploy
   install                                 needs: pipeline
   lint                                    |
-  build                                   tell Render which image to run
-  gate 1: 0 failing tests                 wait for the rollout to finish
-  gate 2: coverage >= 60% / 85%           ask the live service what it is running
+  build                                   railway redeploy --from-source
+  gate 1: 0 failing tests                 ask the live service what it is running
+  gate 2: coverage >= 60% / 85%
   docker build
   publish the image to GHCR
 ```
@@ -252,10 +256,13 @@ build.
 ### What the pipelines need
 
 Each GitHub Environment (`test`, `production`) carries the credentials of its
-own Render service. Nothing else is stored in the repository.
+own Railway environment. Nothing else is stored in the repository.
 
 | Name | Kind | What it is |
 |---|---|---|
-| `RENDER_API_KEY` | secret | Render API key, used to trigger and poll the deploy |
-| `RENDER_SERVICE_ID` | secret | id of that environment's Render service (`srv-…`) |
-| `RENDER_SERVICE_URL` | variable | public URL of that service, used for the health check |
+| `RAILWAY_TOKEN` | secret | Railway project token, scoped to that one environment |
+| `RAILWAY_SERVICE` | variable | name of the service to redeploy (`api`) |
+| `RAILWAY_SERVICE_URL` | variable | public URL of that environment, used for the health check |
+
+A Railway project token is bound to a single environment, so the Test pipeline
+has no credential that could reach Production.

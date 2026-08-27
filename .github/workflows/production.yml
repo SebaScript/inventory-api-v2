@@ -67,9 +67,9 @@ jobs:
 
   # The deployment itself: this is what updates the API that is running.
   #
-  # Render hosts the environment, so deploying is an API call rather than a
-  # shell on a server: tell Render which image to run, wait for the rollout,
-  # then ask the live service which commit it is serving. Nothing is built here.
+  # Railway hosts the environment, so deploying is one command: tell Railway to
+  # pull the image this pipeline just published and roll it out. Nothing is
+  # built here — the environment runs the exact artifact that passed the gates.
   #
   # `needs: pipeline` is what makes the quality gates binding: if either gate
   # fails, the job above fails and this one never starts.
@@ -80,70 +80,31 @@ jobs:
 
     environment:
       name: production
-      url: ${{ vars.RENDER_SERVICE_URL }}
+      url: ${{ vars.RAILWAY_SERVICE_URL }}
 
     steps:
-      - name: Ask Render to run the image this pipeline just published
-        id: trigger
+      - name: Deploy the published image to Railway
         env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          # A Railway project token is scoped to one environment, so it selects
+          # the target on its own: there is no environment flag to get wrong.
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           set -euo pipefail
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
-          echo "deploying $image"
+          npm install -g @railway/cli
 
-          # Pinned to the commit rather than to a moving tag, so the deployment
-          # is reproducible and can be rolled back to a known build.
-          response=$(curl -fsS -X POST \
-            "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
-            -H "Authorization: Bearer ${RENDER_API_KEY}" \
-            -H 'Content-Type: application/json' \
-            -d "{\"imageUrl\":\"${image}\"}")
+          # --from-source is what makes this a deployment rather than a restart:
+          # without it Railway would redeploy the image it is already running.
+          railway redeploy --service "${{ vars.RAILWAY_SERVICE }}" --yes --from-source
 
-          id=$(echo "$response" | jq -r '.id // empty')
-          if [ -z "$id" ]; then
-            echo "::error::Render did not return a deploy id. Response: $response"
-            exit 1
-          fi
-          echo "deploy_id=$id" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for the rollout to finish
-        env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
-          DEPLOY_ID: ${{ steps.trigger.outputs.deploy_id }}
-        run: |
-          set -euo pipefail
-          for _ in $(seq 1 60); do
-            status=$(curl -fsS \
-              "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys/${DEPLOY_ID}" \
-              -H "Authorization: Bearer ${RENDER_API_KEY}" | jq -r '.status')
-            echo "status: $status"
-
-            case "$status" in
-              live) exit 0 ;;
-              build_failed | update_failed | pre_deploy_failed | canceled | deactivated)
-                echo "::error::Render reported the deployment as $status."
-                exit 1
-                ;;
-            esac
-            sleep 10
-          done
-          echo "::error::The deployment did not become live within 10 minutes."
-          exit 1
-
-      # Proof rather than assumption: the running service must report the very
-      # commit this pipeline built.
+      # Proof rather than assumption: every image is stamped with the commit it
+      # was built from, so the running service is asked what it is serving.
       - name: Verify the live service is serving this revision
         env:
-          SERVICE_URL: ${{ vars.RENDER_SERVICE_URL }}
+          SERVICE_URL: ${{ vars.RAILWAY_SERVICE_URL }}
         run: |
           set -euo pipefail
-          for _ in $(seq 1 30); do
-            # A free Render service sleeps when idle, so the first request may
-            # have to wake it before it answers.
-            body=$(curl -fsS --max-time 30 "${SERVICE_URL}/health" || true)
+          for _ in $(seq 1 40); do
+            body=$(curl -fsS --max-time 20 "${SERVICE_URL}/health" || true)
             revision=$(echo "$body" | jq -r '.revision // empty')
 
             if [ "$revision" = "${GITHUB_SHA}" ]; then
