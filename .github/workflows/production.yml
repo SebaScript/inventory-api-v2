@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Build and verify. Produces the artifact; deploys nothing.
   pipeline:
     runs-on: ubuntu-latest
 
@@ -52,82 +53,73 @@ jobs:
         run: npm run test:cov
 
       - name: Build the Docker image
-        run: docker build -t inventory-api:prod .
+        run: docker build --build-arg GIT_SHA=${GITHUB_SHA} -t inventory-api:prod .
 
+      # Two tags for one image: `prod` is what a human pulls, the commit sha is
+      # the immutable reference the deployment pins itself to.
       - name: Publish the image to GHCR
         run: |
-          docker tag inventory-api:prod ghcr.io/${GITHUB_REPOSITORY,,}:prod
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker tag inventory-api:prod ghcr.io/${GITHUB_REPOSITORY,,}:prod
+          docker tag inventory-api:prod ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}
           docker push ghcr.io/${GITHUB_REPOSITORY,,}:prod
+          docker push ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}
 
+  # The deployment itself: this is what updates the API that is running.
+  #
+  # Railway hosts the environment, so deploying is one command: tell Railway to
+  # pull the image this pipeline just published and roll it out. Nothing is
+  # built here — the environment runs the exact artifact that passed the gates.
+  #
+  # `needs: pipeline` is what makes the quality gates binding: if either gate
+  # fails, the job above fails and this one never starts.
   deploy:
     needs: pipeline
     if: github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     environment:
       name: production
-      url: http://localhost:3200
-
-    defaults:
-      run:
-        shell: powershell
+      url: ${{ vars.RAILWAY_SERVICE_URL }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Write the environment configuration
+      - name: Deploy the published image to Railway
         env:
-          ENV_FILE: ${{ secrets.ENV_FILE }}
+          # A Railway project token is scoped to one environment, so it selects
+          # the target on its own: there is no environment flag to get wrong.
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:ENV_FILE)) {
-            Write-Output "::error::The production environment has no ENV_FILE secret configured."
-            exit 1
-          }
-          # LF endings and no byte-order mark, or Compose reads stray characters
-          # into the values.
-          $text = $env:ENV_FILE -replace "`r`n", "`n"
-          $utf8 = New-Object System.Text.UTF8Encoding($false)
-          [System.IO.File]::WriteAllText("$PWD\.env.production", $text, $utf8)
+          set -euo pipefail
+          npm install -g @railway/cli
 
-      - name: Pull the published image and restart the stack
+          # --from-source is what makes this a deployment rather than a restart:
+          # without it Railway would redeploy the image it is already running.
+          railway redeploy --service "${{ vars.RAILWAY_SERVICE }}" --yes --from-source
+
+      # Proof rather than assumption: every image is stamped with the commit it
+      # was built from, so the running service is asked what it is serving.
+      - name: Verify the live service is serving this revision
+        env:
+          SERVICE_URL: ${{ vars.RAILWAY_SERVICE_URL }}
         run: |
-          docker compose --env-file .env.production pull api
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          docker compose --env-file .env.production up -d --no-build
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          set -euo pipefail
+          # Accept the domain with or without a scheme, and with or without a
+          # trailing slash: the dashboard shows it bare, which is how it tends
+          # to get copied.
+          url="${SERVICE_URL%/}"
+          case "$url" in http://* | https://*) ;; *) url="https://$url" ;; esac
+          echo "checking $url/health"
 
-      - name: Verify the environment is serving the new image
-        run: |
-          $healthy = $false
-          for ($i = 0; $i -lt 30; $i++) {
-            try {
-              $r = Invoke-RestMethod http://localhost:3200/health -TimeoutSec 5
-              if ($r.status -eq 'ok') { $healthy = $true; break }
-            } catch { }
-            Start-Sleep -Seconds 2
-          }
-          if (-not $healthy) {
-            Write-Output "::error::The Production API never became healthy after the restart. Container log follows."
-            docker compose --env-file .env.production logs api --tail 40
-            exit 1
-          }
-          Write-Output "health: ok"
+          for _ in $(seq 1 40); do
+            body=$(curl -fsSL --max-time 20 "${url}/health" || true)
+            revision=$(echo "$body" | jq -r '.revision // empty')
 
-          # The running container must be the image that was just pulled, not a
-          # leftover from an earlier deployment.
-          $expected = @(docker image inspect --format '{{.Id}}' ghcr.io/sebascript/inventory-api-v2:prod)[0]
-          $cid = @(docker compose --env-file .env.production ps -q api)[0]
-          $running = @(docker inspect --format '{{.Image}}' $cid)[0]
-          Write-Output "expected: $expected"
-          Write-Output "running:  $running"
-          if ($expected -ne $running) {
-            Write-Output "::error::The running container is not the image that was just published."
-            exit 1
-          }
-          exit 0
-
-      - name: Remove the environment file from the workspace
-        if: always()
-        run: |
-          if (Test-Path .env.production) { Remove-Item .env.production -Force }
+            if [ "$revision" = "${GITHUB_SHA}" ]; then
+              echo "health: $body"
+              exit 0
+            fi
+            echo "serving revision ${revision:-none}, waiting for ${GITHUB_SHA}"
+            sleep 10
+          done
+          echo "::error::The service never reported revision ${GITHUB_SHA}."
+          exit 1

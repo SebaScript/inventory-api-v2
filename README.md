@@ -2,23 +2,24 @@
 
 RESTful inventory API with NestJS + TypeScript + PostgreSQL, containerised with Docker and guarded by two CI/CD pipelines with coverage gates.
 
+The Test and Production environments are deployed on **Railway**, each from the
+image its pipeline published. Everything below runs locally with Docker alone:
+
 ```bash
 git clone https://github.com/SebaScript/inventory-api-v2.git
 cd inventory-api-v2
 
-npm run docker:dev    # DEV   -> docker compose up --build
-npm run docker:test   # TEST  -> docker compose --env-file .env.test up --build -d
-npm run docker:prod   # PROD  -> docker compose --env-file .env.production up --build -d
+npm run docker:dev    # http://localhost:3000  ·  /docs  ·  /health
 ```
 
 | | Local | Test | Production |
 |---|---|---|---|
-| API | :3000 | :3100 | :3200 |
-| PostgreSQL | :5432 | :5433 | :5434 |
-| Env file | `.env` | `.env.test` | `.env.production` |
-| Database | `inventory_dev` | `inventory_test` | `inventory_prod` |
-| Credentials | dev defaults | own | own |
-| Demo data | yes | yes | no |
+| Runs on | Docker on your machine | Railway | Railway |
+| API | `http://localhost:3000` | its own Railway URL | its own Railway URL |
+| Database | container, `inventory_dev` | its own managed PostgreSQL | its own managed PostgreSQL |
+| Configuration | `.env` | variables on the Railway service | variables on the Railway service |
+| Demo data | yes | yes | never |
+| Updated by | you | Test Pipeline (`develop`) | Production Pipeline (`main`) |
 
 ## API
 
@@ -94,10 +95,18 @@ In production an unexpected error returns only `"Internal server error"`. A test
 ## Database
 
 ```
-Group  0..N --classifies-- 1..1  Item  0..N --registers-- 1..1  Movement
+      Group                          Item                        Movement
+  ┌───────────┐                 ┌────────────┐               ┌────────────────┐
+  │ id        │                 │ id         │               │ id             │
+  │ name  (U) │ 0..N       1..1 │ group_id   │          0..N │ item_id        │
+  │ descrip.  │◄──── clasifica ─┤ sku    (U) │◄─── registra ─┤ type  (IN|OUT) │
+  │ created   │                 │ quantity   │          1..1 │ quantity  > 0  │
+  │ updated   │                 │ min_stock  │               │ resulting_stock│
+  └───────────┘                 │ unit_price │               │ reason         │
+                                │ status     │               │ created_at     │
+                                └────────────┘               └────────────────┘
+                ON DELETE RESTRICT            ON DELETE RESTRICT
 ```
-
-TypeORM creates the schema from the entity classes at startup, so the entities are the single source of truth and there is nothing to keep in step with them. `docker compose down -v` rebuilds everything from zero.
 
 | Rule | Why |
 |---|---|
@@ -108,23 +117,45 @@ TypeORM creates the schema from the entity classes at startup, so the entities a
 | `ON DELETE RESTRICT` groups → items | Deleting a category must not destroy inventory |
 | `ON DELETE RESTRICT` items → movements | A movement can never be orphaned; history is permanent |
 
-**The demo data is deterministic and self-consistent.** Items are created empty and their stock is built by applying the movements, so the ledger explains the stock by construction. 3 groups, 6 items, 10 movements — including an item below its minimum and one at zero, so the low-stock filter has something to show. It loads on startup when `SEED=true`, and never in production.
-
 ---
 
 ## Environments
 
-Two independent environments, plus local development, all from **one `docker-compose.yml`**. What separates them is the env file: it sets the compose project name (so Docker treats each as its own stack with its own containers, network and volume), the ports, and the database credentials.
+Test and Production are two **Railway environments** inside one project. Each
+runs the image its own pipeline published, bound to its own PostgreSQL. They
+share nothing, and Railway keeps them isolated by design — a change in one
+environment cannot touch the other:
+
+| | Test | Production |
+|---|---|---|
+| URL | its own `*.up.railway.app` host | its own `*.up.railway.app` host |
+| Database | its own PostgreSQL service | its own PostgreSQL service |
+| Configuration | variables on that environment | variables on that environment |
+| Image tag | `:test` | `:prod` |
+| Deployed from | `develop` | `main` |
+| Demo data | `SEED=true` | `SEED=false` |
+
+Production starts with an empty inventory, and the guard is not only that flag:
+the application refuses to seed whenever `NODE_ENV=production`, even if `SEED`
+were set to true.
+
+Neither environment builds anything. Railway pulls the image the pipeline
+published, so what runs is byte for byte what cleared the quality gates.
+
+The database password is never written down: the service reads
+`DATABASE_URL=${{Postgres.DATABASE_URL}}`, a reference Railway resolves to the
+PostgreSQL service of that same environment.
+
+### Running an environment locally
+
+`docker-compose.yml` is parameterised by an env file, so the same stack can be
+raised on your own machine — useful for development, and as a fallback if the
+hosted environment is unavailable:
 
 ```bash
 cp .env.test.example .env.test              # set a real password
-cp .env.production.example .env.production
-
-npm run docker:test    # :3100
-npm run docker:prod    # :3200
+npm run docker:test                          # http://localhost:3100
 ```
-
-All three can run at once without colliding. Production starts with an empty inventory: `SEED=false`, and the application refuses to seed when `NODE_ENV=production` even if it were set.
 
 ---
 
@@ -169,106 +200,69 @@ Jest exits non-zero when a test fails **or** coverage falls short. That non-zero
 
 ## CI/CD
 
-Two GitHub Actions pipelines. Each is two jobs: one builds and verifies, the other deploys.
+Two GitHub Actions pipelines. Each is two jobs: one builds and verifies, the
+other deploys to Railway.
 
 ```
-job: pipeline  (GitHub runner)        job: deploy  (self-hosted runner)
-  install                               needs: pipeline
-  lint                                  |
-  build                                 pull the published image
-  gate 1: 0 failing tests               restart the stack with it
-  gate 2: coverage >= 60% / 85%         verify /health answers
-  docker build                          verify the running image is that one
-  publish the image to GHCR  ──────────►
+job: pipeline                     ->    job: deploy
+  install                                 needs: pipeline
+  lint                                    |
+  build                                   railway redeploy --from-source
+  gate 1: 0 failing tests                 ask the live service what it is running
+  gate 2: coverage >= 60% / 85%
+  docker build
+  publish the image to GHCR
 ```
 
-`needs: pipeline` is what makes the gates binding: if either gate fails the
-first job fails, and the deploy job never starts.
-
-### Why the deploy job runs on a self-hosted runner
-
-The Test and Production stacks run on a host GitHub cannot reach, so the host
-reaches out instead: a self-hosted runner registered on that machine picks up
-the deploy job, pulls the tag the pipeline just published, and restarts the
-stack with it.
-
-Nothing is ever built on the host. The environment runs the exact image that
-cleared the quality gates — `docker-compose.yml` takes the tag from `API_IMAGE`:
-
-```yaml
-  api:
-    image: ${API_IMAGE:-inventory-api:dev}   # :test / :prod in each env file
-    build: .                                  # only local development builds
-```
-
-The last step proves the deployment actually happened, rather than assuming it:
-
-```powershell
-$expected = docker image inspect --format '{{.Id}}' ghcr.io/…:prod
-$cid      = docker compose --env-file .env.production ps -q api
-$running  = docker inspect --format '{{.Image}}' $cid
-if ($expected -ne $running) { exit 1 }
-```
-
-If the restart silently kept the old container, the digests differ and the
-deployment fails instead of reporting a success it did not achieve.
-
-### Where the secrets live
-
-Each environment is a **GitHub Environment** (`test`, `production`) holding its
-own `ENV_FILE` secret with that environment's ports, database name, credentials
-and image tag. The repository contains only the `.env.*.example` templates. The
-deploy job writes the file, uses it, and deletes it.
-
-### Reproducing the deployment host
-
-The deploy job needs a machine that runs the environments and a runner
-registered on it:
-
-1. **Register the runner** — repository *Settings → Actions → Runners → New
-   self-hosted runner*, then run the commands GitHub shows. Answer **N** to
-   "run as service": Docker Desktop exposes its daemon per user, and a service
-   running as `NETWORK SERVICE` cannot reach it. Start it with `run.cmd`.
-2. **Create the environments** — *Settings → Environments*, one named `test`
-   and one named `production`, each with an `ENV_FILE` secret holding that
-   environment's configuration (the `.env.*.example` files are the template,
-   plus the `API_IMAGE` line).
-
-The deploy steps are written in PowerShell rather than bash: on a Windows
-runner `bash` resolves to the WSL launcher stub, while Git Bash sits outside
-`PATH`.
-
-> PostgreSQL only applies `POSTGRES_PASSWORD` when it initialises an empty data
-> directory. If an environment's volume already exists, `DB_PASSWORD` in the
-> secret must match the password that volume was created with — otherwise the
-> API starts, fails to authenticate, and the deployment is rejected.
-
-Both run the suite against a real PostgreSQL service container. `COVERAGE_MIN` is the only difference between the two files: `60` in one, `85` in the other.
+`needs: pipeline` is what makes the gates binding: if either gate fails, the
+first job fails and the deploy job never starts. A pull request builds and
+publishes, but never deploys.
 
 ### The two quality gates
 
-Each one is its own step, so the pipeline log says which rule stopped it.
+Each one is its own step, so a red pipeline says which rule stopped it.
 
 | Gate | Step | Enforced by | Fails when |
 |---|---|---|---|
 | **0 failing tests** | `npm test` | Jest's exit code | any test fails — or no tests are found at all, so the gate cannot be passed by deleting the suite |
-| **Coverage** | `npm run test:cov` | Jest's `coverageThreshold` | any metric is below `COVERAGE_MIN` |
+| **Coverage** | `npm run test:cov` | Jest's `coverageThreshold` | any metric is below `COVERAGE_MIN`, which is the only difference between the two pipeline files: `60` and `85` |
 
-Both were verified by making them fail on purpose:
+There is no `|| true`, no `continue-on-error` and no ignored exit code anywhere.
 
-```bash
-# a single failing test
-$ npm test
-Tests: 1 failed, 28 passed, 29 total          -> exit 1
+### How the deployment is verified
 
-# no tests at all
-$ npm test
-No tests found, exiting with code 1           -> exit 1
+Every image is stamped at build time with the commit it came from:
 
-# coverage below the bar
-$ COVERAGE_MIN=99 npm run test:cov
-Jest: Coverage for branches (90.51%) does not
-      meet "global" threshold (99%)           -> exit 1
+```dockerfile
+ARG GIT_SHA=dev
+ENV GIT_SHA=$GIT_SHA
 ```
 
-A step that exits non-zero ends the job, and `Deploy` is the last step — so neither gate can be missed and still reach a deployment. There is no `|| true`, no `continue-on-error` and no ignored exit code anywhere.
+`/health` reports it, so the last step of the deploy does not assume the
+rollout worked — it asks:
+
+```bash
+body=$(curl -fsS "${SERVICE_URL}/health")
+revision=$(echo "$body" | jq -r '.revision')
+[ "$revision" = "${GITHUB_SHA}" ]      # otherwise the job fails
+```
+
+A deployment that silently kept the previous version therefore fails the
+pipeline instead of reporting a success it did not achieve. The image is also
+pushed under its commit sha and deployed by that tag rather than by `:test` or
+`:prod`, so a deployment is reproducible and can be rolled back to a known
+build.
+
+### What the pipelines need
+
+Each GitHub Environment (`test`, `production`) carries the credentials of its
+own Railway environment. Nothing else is stored in the repository.
+
+| Name | Kind | What it is |
+|---|---|---|
+| `RAILWAY_TOKEN` | secret | Railway project token, scoped to that one environment |
+| `RAILWAY_SERVICE` | variable | name of the service to redeploy (`api`) |
+| `RAILWAY_SERVICE_URL` | variable | public URL of that environment, used for the health check |
+
+A Railway project token is bound to a single environment, so the Test pipeline
+has no credential that could reach Production.

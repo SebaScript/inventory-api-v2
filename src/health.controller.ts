@@ -10,12 +10,17 @@ export class HealthController {
 
   @Get()
   @ApiOperation({ summary: 'Service and database health' })
-  @ApiResponse({ status: 200, schema: { example: { status: 'ok', database: 'up' } } })
+  @ApiResponse({
+    status: 200,
+    schema: { example: { status: 'ok', database: 'up', revision: 'a1b2c3d' } },
+  })
   @ApiResponse({ status: 503, description: 'PostgreSQL is unreachable' })
-  async check(): Promise<{ status: string; database: string }> {
+  async check(): Promise<{ status: string; database: string; revision: string }> {
     try {
       await this.dataSource.query('SELECT 1');
-      return { status: 'ok', database: 'up' };
+      // `revision` is stamped into the image at build time, so the deploy job
+      // can confirm the host is serving the commit it just published.
+      return { status: 'ok', database: 'up', revision: process.env.GIT_SHA ?? 'dev' };
     } catch {
       throw new ServiceUnavailableException({ status: 'error', database: 'down' });
     }
