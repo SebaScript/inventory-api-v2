@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Build and verify. Produces the artifact; deploys nothing.
   pipeline:
     runs-on: ubuntu-latest
 
@@ -52,82 +53,105 @@ jobs:
         run: npm run test:cov
 
       - name: Build the Docker image
-        run: docker build -t inventory-api:prod .
+        run: docker build --build-arg GIT_SHA=${GITHUB_SHA} -t inventory-api:prod .
 
+      # Two tags for one image: `prod` is what a human pulls, the commit sha is
+      # the immutable reference the deployment pins itself to.
       - name: Publish the image to GHCR
         run: |
-          docker tag inventory-api:prod ghcr.io/${GITHUB_REPOSITORY,,}:prod
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker tag inventory-api:prod ghcr.io/${GITHUB_REPOSITORY,,}:prod
+          docker tag inventory-api:prod ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}
           docker push ghcr.io/${GITHUB_REPOSITORY,,}:prod
+          docker push ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}
 
+  # The deployment itself: this is what updates the API that is running.
+  #
+  # Render hosts the environment, so deploying is an API call rather than a
+  # shell on a server: tell Render which image to run, wait for the rollout,
+  # then ask the live service which commit it is serving. Nothing is built here.
+  #
+  # `needs: pipeline` is what makes the quality gates binding: if either gate
+  # fails, the job above fails and this one never starts.
   deploy:
     needs: pipeline
     if: github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     environment:
       name: production
-      url: http://localhost:3200
-
-    defaults:
-      run:
-        shell: powershell
+      url: ${{ vars.RENDER_SERVICE_URL }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Write the environment configuration
+      - name: Ask Render to run the image this pipeline just published
+        id: trigger
         env:
-          ENV_FILE: ${{ secrets.ENV_FILE }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:ENV_FILE)) {
-            Write-Output "::error::The production environment has no ENV_FILE secret configured."
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
+          echo "deploying $image"
+
+          # Pinned to the commit rather than to a moving tag, so the deployment
+          # is reproducible and can be rolled back to a known build.
+          response=$(curl -fsS -X POST \
+            "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"imageUrl\":\"${image}\"}")
+
+          id=$(echo "$response" | jq -r '.id // empty')
+          if [ -z "$id" ]; then
+            echo "::error::Render did not return a deploy id. Response: $response"
             exit 1
-          }
-          # LF endings and no byte-order mark, or Compose reads stray characters
-          # into the values.
-          $text = $env:ENV_FILE -replace "`r`n", "`n"
-          $utf8 = New-Object System.Text.UTF8Encoding($false)
-          [System.IO.File]::WriteAllText("$PWD\.env.production", $text, $utf8)
+          fi
+          echo "deploy_id=$id" >> "$GITHUB_OUTPUT"
 
-      - name: Pull the published image and restart the stack
+      - name: Wait for the rollout to finish
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          DEPLOY_ID: ${{ steps.trigger.outputs.deploy_id }}
         run: |
-          docker compose --env-file .env.production pull api
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          docker compose --env-file .env.production up -d --no-build
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            status=$(curl -fsS \
+              "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys/${DEPLOY_ID}" \
+              -H "Authorization: Bearer ${RENDER_API_KEY}" | jq -r '.status')
+            echo "status: $status"
 
-      - name: Verify the environment is serving the new image
+            case "$status" in
+              live) exit 0 ;;
+              build_failed | update_failed | pre_deploy_failed | canceled | deactivated)
+                echo "::error::Render reported the deployment as $status."
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          echo "::error::The deployment did not become live within 10 minutes."
+          exit 1
+
+      # Proof rather than assumption: the running service must report the very
+      # commit this pipeline built.
+      - name: Verify the live service is serving this revision
+        env:
+          SERVICE_URL: ${{ vars.RENDER_SERVICE_URL }}
         run: |
-          $healthy = $false
-          for ($i = 0; $i -lt 30; $i++) {
-            try {
-              $r = Invoke-RestMethod http://localhost:3200/health -TimeoutSec 5
-              if ($r.status -eq 'ok') { $healthy = $true; break }
-            } catch { }
-            Start-Sleep -Seconds 2
-          }
-          if (-not $healthy) {
-            Write-Output "::error::The Production API never became healthy after the restart. Container log follows."
-            docker compose --env-file .env.production logs api --tail 40
-            exit 1
-          }
-          Write-Output "health: ok"
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            # A free Render service sleeps when idle, so the first request may
+            # have to wake it before it answers.
+            body=$(curl -fsS --max-time 30 "${SERVICE_URL}/health" || true)
+            revision=$(echo "$body" | jq -r '.revision // empty')
 
-          # The running container must be the image that was just pulled, not a
-          # leftover from an earlier deployment.
-          $expected = @(docker image inspect --format '{{.Id}}' ghcr.io/sebascript/inventory-api-v2:prod)[0]
-          $cid = @(docker compose --env-file .env.production ps -q api)[0]
-          $running = @(docker inspect --format '{{.Image}}' $cid)[0]
-          Write-Output "expected: $expected"
-          Write-Output "running:  $running"
-          if ($expected -ne $running) {
-            Write-Output "::error::The running container is not the image that was just published."
-            exit 1
-          }
-          exit 0
-
-      - name: Remove the environment file from the workspace
-        if: always()
-        run: |
-          if (Test-Path .env.production) { Remove-Item .env.production -Force }
+            if [ "$revision" = "${GITHUB_SHA}" ]; then
+              echo "health: $body"
+              exit 0
+            fi
+            echo "serving revision ${revision:-none}, waiting for ${GITHUB_SHA}"
+            sleep 10
+          done
+          echo "::error::The service never reported revision ${GITHUB_SHA}."
+          exit 1
