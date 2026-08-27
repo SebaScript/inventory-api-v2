@@ -103,8 +103,15 @@ jobs:
           SERVICE_URL: ${{ vars.RAILWAY_SERVICE_URL }}
         run: |
           set -euo pipefail
+          # Accept the domain with or without a scheme, and with or without a
+          # trailing slash: the dashboard shows it bare, which is how it tends
+          # to get copied.
+          url="${SERVICE_URL%/}"
+          case "$url" in http://* | https://*) ;; *) url="https://$url" ;; esac
+          echo "checking $url/health"
+
           for _ in $(seq 1 40); do
-            body=$(curl -fsS --max-time 20 "${SERVICE_URL}/health" || true)
+            body=$(curl -fsSL --max-time 20 "${url}/health" || true)
             revision=$(echo "$body" | jq -r '.revision // empty')
 
             if [ "$revision" = "${GITHUB_SHA}" ]; then
