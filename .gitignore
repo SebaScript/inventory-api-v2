@@ -32,3 +32,6 @@ Thumbs.db
 
 docs/
 postman/
+
+# Local working context for AI agents, never synced
+CLAUDE.local.md
