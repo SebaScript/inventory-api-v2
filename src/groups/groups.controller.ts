@@ -16,10 +16,12 @@ import { Group } from '../entities/group.entity';
 import { CreateGroupDto, FindGroupsDto, UpdateGroupDto } from './group.dto';
 import { GroupsService } from './groups.service';
 
-@ApiTags('Groups')
-@Controller('groups')
-export class GroupsController {
-  constructor(private readonly service: GroupsService) {}
+/**
+ * Every route of the resource, with no path and no version of its own. Each
+ * version below mounts it, so a version only has to declare what it changes.
+ */
+export abstract class GroupsControllerBase {
+  constructor(protected readonly service: GroupsService) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a group' })
@@ -55,5 +57,15 @@ export class GroupsController {
   @ApiResponse({ status: 409, description: 'The group still has items' })
   remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return this.service.remove(id);
+  }
+}
+
+@ApiTags('Groups')
+@Controller('groups')
+export class GroupsController extends GroupsControllerBase {
+  // Declared on purpose: without it TypeScript emits no `design:paramtypes`
+  // for this class and Nest injects `undefined` instead of failing to start.
+  constructor(service: GroupsService) {
+    super(service);
   }
 }

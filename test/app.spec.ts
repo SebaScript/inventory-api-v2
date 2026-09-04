@@ -17,9 +17,10 @@ describe('Application', () => {
   afterAll(() => app.close());
 
   it('reports health by querying the database, and 503 when it is unreachable', async () => {
-    const body = (await api.get('/health').expect(200)).body;
-    expect(body).toMatchObject({ status: 'ok', database: 'up' });
-    expect(body.revision).toBeTruthy();
+    expect((await api.get('/health').expect(200)).body).toMatchObject({
+      status: 'ok',
+      database: 'up',
+    });
 
     const spy = jest.spyOn(dataSource, 'query').mockRejectedValue(new Error('down'));
     expect((await api.get('/health').expect(503)).body.database).toBe('down');

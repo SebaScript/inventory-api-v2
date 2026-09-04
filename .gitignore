@@ -11,8 +11,6 @@ junit.xml
 .env
 .env.*
 !.env.example
-!.env.test.example
-!.env.production.example
 
 logs/
 *.log
@@ -32,3 +30,6 @@ Thumbs.db
 
 docs/
 postman/
+
+# Local working context for AI agents, never synced
+CLAUDE.local.md

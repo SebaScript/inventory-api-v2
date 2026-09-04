@@ -16,14 +16,7 @@
     "format": "prettier --write \"{src,test}/**/*.ts\"",
     "format:check": "prettier --check \"{src,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "test": "jest",
-    "test:cov": "jest --coverage",
-    "report": "node scripts/report.js",
-    "db:up": "docker compose up -d postgres",
-    "db:down": "docker compose down -v",
-    "docker:dev": "docker compose up --build",
-    "docker:test": "docker compose --env-file .env.test up --build -d",
-    "docker:prod": "docker compose --env-file .env.production up --build -d"
+    "test": "jest"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.1",

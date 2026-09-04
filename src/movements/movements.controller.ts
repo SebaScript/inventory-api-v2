@@ -5,10 +5,12 @@ import { Movement } from '../entities/movement.entity';
 import { CreateMovementDto, FindMovementsDto } from './movement.dto';
 import { MovementsService } from './movements.service';
 
-@ApiTags('Movements')
-@Controller('movements')
-export class MovementsController {
-  constructor(private readonly service: MovementsService) {}
+/**
+ * Every route of the resource, with no path and no version of its own. Each
+ * version below mounts it, so a version only has to declare what it changes.
+ */
+export abstract class MovementsControllerBase {
+  constructor(protected readonly service: MovementsService) {}
 
   @Post()
   @ApiOperation({
@@ -34,5 +36,15 @@ export class MovementsController {
   @ApiResponse({ status: 200, type: Movement })
   findOne(@Param('id', ParseIntPipe) id: number): Promise<Movement> {
     return this.service.findOne(id);
+  }
+}
+
+@ApiTags('Movements')
+@Controller('movements')
+export class MovementsController extends MovementsControllerBase {
+  // Declared on purpose: without it TypeScript emits no `design:paramtypes`
+  // for this class and Nest injects `undefined` instead of failing to start.
+  constructor(service: MovementsService) {
+    super(service);
   }
 }

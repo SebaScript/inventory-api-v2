@@ -1,27 +1,66 @@
 # Inventory API
 
-RESTful inventory API with NestJS + TypeScript + PostgreSQL, containerised with Docker and guarded by two CI/CD pipelines with coverage gates.
+RESTful inventory API with NestJS + TypeScript + PostgreSQL.
 
-The Test and Production environments are deployed on **Railway**, each from the
-image its pipeline published. Everything below runs locally with Docker alone:
+Every resource is served twice: at its bare path and under `/v2`. The two
+versions are the same code today — `/v2` is the surface new behaviour will be
+added to, without disturbing what already calls the original paths.
 
 ```bash
 git clone https://github.com/SebaScript/inventory-api-v2.git
 cd inventory-api-v2
+npm install
 
-npm run docker:dev    # http://localhost:3000  ·  /docs  ·  /health
+cp .env.example .env          # point DATABASE_URL at your PostgreSQL
+npm run start:dev             # http://localhost:3000  ·  /docs  ·  /health
 ```
 
-| | Local | Test | Production |
-|---|---|---|---|
-| Runs on | Docker on your machine | Railway | Railway |
-| API | `http://localhost:3000` | its own Railway URL | its own Railway URL |
-| Database | container, `inventory_dev` | its own managed PostgreSQL | its own managed PostgreSQL |
-| Configuration | `.env` | variables on the Railway service | variables on the Railway service |
-| Demo data | yes | yes | never |
-| Updated by | you | Test Pipeline (`develop`) | Production Pipeline (`main`) |
+You need Node 22+ and a PostgreSQL you can reach. There is nothing to migrate:
+TypeORM builds the schema from the entities on boot (`synchronize: true`),
+which is convenient here and would be dangerous on a database holding real
+data. `SEED=true` loads demo data, and the application refuses to seed whenever
+`NODE_ENV=production`.
+
+## Versions
+
+Versioning is NestJS URI versioning. The original controllers are declared
+version **neutral**, so their paths did not change; only a controller that
+declares a version gets a prefix.
+
+| | Base path | Declared as |
+|---|---|---|
+| Original | `/groups`, `/items`, `/movements` | version neutral |
+| v2 | `/v2/groups`, `/v2/items`, `/v2/movements` | `version: '2'` |
+
+Both versions read and write the same database through the same services, so a
+record created through one is immediately visible from the other.
+
+Each resource keeps its routes in a single abstract base controller with no
+path and no version of its own. Both versions mount that base, so `/v2` starts
+as an exact mirror and a future change there is declared by overriding one
+method — everything else keeps coming from the base:
+
+```ts
+@ApiTags('Items v2')
+@Controller({ path: 'items', version: '2' })
+export class ItemsV2Controller extends ItemsControllerBase {
+  constructor(service: ItemsService) {
+    super(service);
+  }
+}
+```
+
+That constructor is not boilerplate that can be deleted. Without it TypeScript
+emits no `design:paramtypes` for the class, and Nest injects `undefined`
+instead of failing to start: the application boots green and the routes answer
+`500`.
+
+`/health` stays version neutral: it reports the process, not the API surface.
 
 ## API
+
+The paths below are listed unversioned. Each one also exists under `/v2` with
+identical behaviour.
 
 ### Groups: `/groups`
 
@@ -49,6 +88,12 @@ An item is a product. It holds the **current state**: how much stock there is ri
 | `PATCH` | `/items/:id` | Updates only the fields that were sent. The stock is never one of them. Also brings a product back with `{"status":"ACTIVE"}` |
 | `DELETE` | `/items/:id` | **Discontinues** it: it leaves the listings and accepts no more movements, but neither it nor its history is erased |
 
+`QUERY` is a real HTTP method, safe and idempotent like `GET` but carrying a
+request body. OpenAPI 3.0 has a closed list of methods that does not include
+it, so the endpoint cannot appear in `/docs` as an operation — it is named in
+the document description instead, and `POST /items/search` is an identical
+alias for clients that cannot send the verb. Both exist under `/v2` too.
+
 ### Movements: `/movements`
 
 A movement is an entry or exit of stock. It is the **immutable event log** that explains every unit — hence no `PUT`, `PATCH` or `DELETE`. A mistake is corrected with an opposite movement.
@@ -63,7 +108,7 @@ A movement is an entry or exit of stock. It is the **immutable event log** that 
 
 | Method | Path | What it does |
 |---|---|---|
-| `GET` | `/health` | Runs a real query against PostgreSQL. `503` if the database is unreachable. Docker uses it as the container `HEALTHCHECK` |
+| `GET` | `/health` | Runs a real query against PostgreSQL. `503` if the database is unreachable |
 
 ### Errors
 
@@ -117,57 +162,25 @@ In production an unexpected error returns only `"Internal server error"`. A test
 | `ON DELETE RESTRICT` groups → items | Deleting a category must not destroy inventory |
 | `ON DELETE RESTRICT` items → movements | A movement can never be orphaned; history is permanent |
 
----
+The central rule is that an item's stock always equals the sum of its own
+movements, and is never negative. Four layers defend it: the update DTO has no
+`quantity` field at all, every movement runs inside a transaction, the item row
+is locked with `SELECT … FOR UPDATE`, and PostgreSQL holds a `CHECK` constraint
+underneath. A test fires two concurrent `OUT` movements against the same item
+and asserts that exactly one of them fails.
 
-## Environments
+## Tests
 
-Test and Production are two **Railway environments** inside one project. Each
-runs the image its own pipeline published, bound to its own PostgreSQL. They
-share nothing, and Railway keeps them isolated by design — a change in one
-environment cannot touch the other:
-
-| | Test | Production |
-|---|---|---|
-| URL | its own `*.up.railway.app` host | its own `*.up.railway.app` host |
-| Database | its own PostgreSQL service | its own PostgreSQL service |
-| Configuration | variables on that environment | variables on that environment |
-| Image tag | `:test` | `:prod` |
-| Deployed from | `develop` | `main` |
-| Demo data | `SEED=true` | `SEED=false` |
-
-Production starts with an empty inventory, and the guard is not only that flag:
-the application refuses to seed whenever `NODE_ENV=production`, even if `SEED`
-were set to true.
-
-Neither environment builds anything. Railway pulls the image the pipeline
-published, so what runs is byte for byte what cleared the quality gates.
-
-The database password is never written down: the service reads
-`DATABASE_URL=${{Postgres.DATABASE_URL}}`, a reference Railway resolves to the
-PostgreSQL service of that same environment.
-
-### Running an environment locally
-
-`docker-compose.yml` is parameterised by an env file, so the same stack can be
-raised on your own machine — useful for development, and as a fallback if the
-hosted environment is unavailable:
+The suite runs end to end against a **real PostgreSQL** — it asserts on
+transactions, row locks and `CHECK` constraints, none of which can be faked.
 
 ```bash
-cp .env.test.example .env.test              # set a real password
-npm run docker:test                          # http://localhost:3100
+export DATABASE_URL="postgres://user:password@localhost:5432/inventory_test"
+npm test
 ```
 
----
-
-## Testing and coverage
-
-28 tests against **real PostgreSQL** — the suite asserts on transactions, row locks and CHECK constraints, none of which can be faked.
-
-```bash
-npm run db:up      # start PostgreSQL
-npm test           # run the suite
-npm run report     # suite + coverage against both gates
-```
+That database is truncated between tests, so point it at one holding nothing
+you want to keep.
 
 | File | Covers |
 |---|---|
@@ -176,93 +189,15 @@ npm run report     # suite + coverage against both gates
 | `test/movements.spec.ts` | IN, OUT, insufficient stock, **concurrency**, the CHECK constraint |
 | `test/errors.spec.ts` | Error shape, database error mapping, no leaks in production |
 | `test/app.spec.ts` | Health check, OpenAPI document, demo data consistency |
+| `test/v2.spec.ts` | The `/v2` surface, shared data, QUERY under v2, the Swagger tags |
 
-### Coverage
+## Scripts
 
-| Metric | Achieved | Test gate | Production gate |
-|---|---|---|---|
-| Statements | **99.3%** | 60% | 85% |
-| Lines | **99.7%** | 60% | 85% |
-| Functions | **100%** | 60% | 85% |
-| Branches | **90.5%** | 60% | 85% |
-
-The gate is Jest itself:
-
-```ts
-// jest.config.ts
-const COVERAGE_MIN = Number(process.env.COVERAGE_MIN ?? 85);
-coverageThreshold: { global: { lines: COVERAGE_MIN, /* ... */ } }
-```
-
-Jest exits non-zero when a test fails **or** coverage falls short. That non-zero exit is what stops the pipeline. There is no `|| true` and no ignored exit code anywhere.
-
----
-
-## CI/CD
-
-Two GitHub Actions pipelines. Each is two jobs: one builds and verifies, the
-other deploys to Railway.
-
-```
-job: pipeline                     ->    job: deploy
-  install                                 needs: pipeline
-  lint                                    |
-  build                                   railway redeploy --from-source
-  gate 1: 0 failing tests                 ask the live service what it is running
-  gate 2: coverage >= 60% / 85%
-  docker build
-  publish the image to GHCR
-```
-
-`needs: pipeline` is what makes the gates binding: if either gate fails, the
-first job fails and the deploy job never starts. A pull request builds and
-publishes, but never deploys.
-
-### The two quality gates
-
-Each one is its own step, so a red pipeline says which rule stopped it.
-
-| Gate | Step | Enforced by | Fails when |
-|---|---|---|---|
-| **0 failing tests** | `npm test` | Jest's exit code | any test fails — or no tests are found at all, so the gate cannot be passed by deleting the suite |
-| **Coverage** | `npm run test:cov` | Jest's `coverageThreshold` | any metric is below `COVERAGE_MIN`, which is the only difference between the two pipeline files: `60` and `85` |
-
-There is no `|| true`, no `continue-on-error` and no ignored exit code anywhere.
-
-### How the deployment is verified
-
-Every image is stamped at build time with the commit it came from:
-
-```dockerfile
-ARG GIT_SHA=dev
-ENV GIT_SHA=$GIT_SHA
-```
-
-`/health` reports it, so the last step of the deploy does not assume the
-rollout worked — it asks:
-
-```bash
-body=$(curl -fsS "${SERVICE_URL}/health")
-revision=$(echo "$body" | jq -r '.revision')
-[ "$revision" = "${GITHUB_SHA}" ]      # otherwise the job fails
-```
-
-A deployment that silently kept the previous version therefore fails the
-pipeline instead of reporting a success it did not achieve. The image is also
-pushed under its commit sha and deployed by that tag rather than by `:test` or
-`:prod`, so a deployment is reproducible and can be rolled back to a known
-build.
-
-### What the pipelines need
-
-Each GitHub Environment (`test`, `production`) carries the credentials of its
-own Railway environment. Nothing else is stored in the repository.
-
-| Name | Kind | What it is |
-|---|---|---|
-| `RAILWAY_TOKEN` | secret | Railway project token, scoped to that one environment |
-| `RAILWAY_SERVICE` | variable | name of the service to redeploy (`api`) |
-| `RAILWAY_SERVICE_URL` | variable | public URL of that environment, used for the health check |
-
-A Railway project token is bound to a single environment, so the Test pipeline
-has no credential that could reach Production.
+| Command | What it does |
+|---|---|
+| `npm run start:dev` | Runs the API with reload |
+| `npm run build` | Compiles to `dist/` |
+| `npm test` | Runs the suite |
+| `npm run lint` | ESLint over `src` and `test` |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run format` | Prettier over `src` and `test` |
