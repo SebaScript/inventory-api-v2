@@ -17,7 +17,6 @@
     "format:check": "prettier --check \"{src,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "jest",
-    "test:cov": "jest --coverage",
     "report": "node scripts/report.js"
   },
   "dependencies": {
