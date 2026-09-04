@@ -1,4 +1,4 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger, VERSION_NEUTRAL, ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
@@ -11,6 +11,10 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
 
   const isProduction = process.env.NODE_ENV === 'production';
+
+  // The original API keeps its bare paths, so nothing that already calls it
+  // breaks; only the controllers that declare a version get a `/vN` prefix.
+  app.enableVersioning({ type: VersioningType.URI, defaultVersion: VERSION_NEUTRAL });
 
   app.useGlobalPipes(
     new ValidationPipe({
