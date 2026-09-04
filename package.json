@@ -16,8 +16,7 @@
     "format": "prettier --write \"{src,test}/**/*.ts\"",
     "format:check": "prettier --check \"{src,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "test": "jest",
-    "report": "node scripts/report.js"
+    "test": "jest"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.1",
