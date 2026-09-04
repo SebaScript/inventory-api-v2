@@ -11,8 +11,6 @@ junit.xml
 .env
 .env.*
 !.env.example
-!.env.test.example
-!.env.production.example
 
 logs/
 *.log
