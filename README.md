@@ -9,17 +9,20 @@ added to, without disturbing what already calls the original paths.
 ```bash
 git clone https://github.com/SebaScript/inventory-api-v2.git
 cd inventory-api-v2
-npm install
+cp .env.example .env
 
-cp .env.example .env          # point DATABASE_URL at your PostgreSQL
-npm run start:dev             # http://localhost:3000  ·  /docs  ·  /health
+npm run docker:dev            # http://localhost:3000  ·  /docs  ·  /health
 ```
 
-You need Node 22+ and a PostgreSQL you can reach. There is nothing to migrate:
-TypeORM builds the schema from the entities on boot (`synchronize: true`),
-which is convenient here and would be dangerous on a database holding real
-data. `SEED=true` loads demo data, and the application refuses to seed whenever
-`NODE_ENV=production`.
+That builds the image and raises the API together with its PostgreSQL, so
+Docker is the only thing you need installed. To run the API on your own machine
+instead, `npm install` and `npm run start:dev`, with `npm run db:up` giving you
+just the database.
+
+There is nothing to migrate: TypeORM builds the schema from the entities on
+boot (`synchronize: true`), which is convenient here and would be dangerous on
+a database holding real data. `SEED=true` loads demo data, and the application
+refuses to seed whenever `NODE_ENV=production`.
 
 ## Versions
 
@@ -169,18 +172,39 @@ is locked with `SELECT … FOR UPDATE`, and PostgreSQL holds a `CHECK` constrain
 underneath. A test fires two concurrent `OUT` movements against the same item
 and asserts that exactly one of them fails.
 
+## Docker
+
+| File | What it is |
+|---|---|
+| `Dockerfile` | Two stages: the first compiles and prunes the dev dependencies, the second copies only `node_modules` and `dist`. It runs as the `node` user and carries a `HEALTHCHECK` that calls `/health` |
+| `docker-compose.yml` | Two services: `postgres`, and `api` built from that Dockerfile. The API waits for `service_healthy`, not merely for the container to exist |
+
+Two details worth knowing, both of which cost an afternoon once:
+
+- The volume is mounted at `/var/lib/postgresql`. Postgres 18 moved its cluster
+  there, and mounting the `/data` subdirectory earlier versions used stops the
+  container from starting.
+- The healthcheck calls `127.0.0.1`, not `localhost`, which inside the
+  container resolves to `::1` where nothing is listening.
+
+The database is published on host port **5433**, because 5432 is usually taken
+by a PostgreSQL installed directly on the machine. Everything is parameterised
+through `.env`: `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `API_PORT`.
+
 ## Tests
 
 The suite runs end to end against a **real PostgreSQL** — it asserts on
 transactions, row locks and `CHECK` constraints, none of which can be faked.
+Docker supplies that database:
 
 ```bash
-export DATABASE_URL="postgres://user:password@localhost:5432/inventory_test"
-npm test
+npm run db:up      # PostgreSQL alone, on localhost:5433
+npm test           # reads DATABASE_URL from .env
 ```
 
-That database is truncated between tests, so point it at one holding nothing
-you want to keep.
+The tables are truncated between tests, so do not point `DATABASE_URL` at a
+database holding anything you want to keep. `npm run db:down` removes the
+container and its volume.
 
 | File | Covers |
 |---|---|
@@ -195,7 +219,10 @@ you want to keep.
 
 | Command | What it does |
 |---|---|
-| `npm run start:dev` | Runs the API with reload |
+| `npm run docker:dev` | Builds and raises the whole stack, API and database |
+| `npm run db:up` | Raises only PostgreSQL, on `localhost:5433` |
+| `npm run db:down` | Tears the stack down, volume included |
+| `npm run start:dev` | Runs the API on the host, with reload |
 | `npm run build` | Compiles to `dist/` |
 | `npm test` | Runs the suite |
 | `npm run lint` | ESLint over `src` and `test` |
