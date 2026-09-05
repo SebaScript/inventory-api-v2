@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-inventory}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-inventory}
+      POSTGRES_DB: ${DB_NAME:-inventory}
+    # 5433 on the host: 5432 is usually taken by a locally installed PostgreSQL.
+    ports:
+      - '${DB_PORT:-5433}:5432'
+    # Postgres 18 puts its cluster in /var/lib/postgresql, not in the /data
+    # subdirectory earlier versions used.
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-inventory} -d ${DB_NAME:-inventory}']
+      interval: 5s
+      retries: 10
+
+  api:
+    image: inventory-api:dev
+    build: .
+    restart: unless-stopped
+    ports:
+      - '${API_PORT:-3000}:3000'
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgres://${DB_USER:-inventory}:${DB_PASSWORD:-inventory}@postgres:5432/${DB_NAME:-inventory}
+      SEED: ${SEED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
