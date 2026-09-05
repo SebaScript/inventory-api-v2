@@ -16,7 +16,10 @@
     "format": "prettier --write \"{src,test}/**/*.ts\"",
     "format:check": "prettier --check \"{src,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down -v",
+    "docker:dev": "docker compose up --build"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.1",
