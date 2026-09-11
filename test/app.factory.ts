@@ -3,15 +3,21 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { CacheService } from '../src/cache/cache.service';
 import { HttpExceptionFilter } from '../src/common/http-exception.filter';
 import { setupSwagger } from '../src/swagger';
 
-export async function createApp(): Promise<{
+export async function createApp(cache?: CacheService): Promise<{
   app: INestApplication;
   dataSource: DataSource;
   api: ReturnType<typeof request>;
 }> {
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const builder = Test.createTestingModule({ imports: [AppModule] });
+  // Without an override the real CacheService runs with no REDIS_URL, which is
+  // the disabled path every other spec exercises.
+  if (cache) builder.overrideProvider(CacheService).useValue(cache);
+
+  const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication({ logger: false });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: VERSION_NEUTRAL });
