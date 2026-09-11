@@ -1,0 +1,35 @@
+# Run once, BEFORE the Deployment, and only once.
+#   kubectl apply -f deploy/seed-job.yaml
+#   kubectl wait --for=condition=complete job/inventory-seed -n inventory --timeout=300s
+#
+# Order matters: this job runs with DB_SYNC=true and is what creates the schema
+# from the entities. The Deployment runs with DB_SYNC=false, because two
+# replicas building the schema at the same time race each other.
+#
+# The application refuses to seed on boot in production, which is deliberate:
+# filling a database is an explicit operation, not a side effect of starting.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: inventory-seed
+  namespace: inventory
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: inventory-api
+      containers:
+        - name: seed
+          image: REPLACE_WITH_YOUR_ECR_REPOSITORY:latest
+          command: ['node', 'dist/database/seed.cli.js']
+          envFrom:
+            - configMapRef:
+                name: inventory-api
+            - secretRef:
+                name: inventory-api
+          env:
+            # The very first run also has to create the schema, since the
+            # Deployment runs with synchronisation turned off.
+            - name: DB_SYNC
+              value: 'true'

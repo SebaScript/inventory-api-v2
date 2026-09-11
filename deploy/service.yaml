@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-api
+  namespace: inventory
+  annotations:
+    # Internal, not internet-facing. The only way in is API Gateway through its
+    # VPC Link, which is what makes the API key a real boundary instead of one
+    # that can be walked around by calling the load balancer directly.
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+    # Targets pod IPs rather than nodes.
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    # The load balancer asks liveness, not readiness of the database: it only
+    # needs to know the process answers.
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: HTTP
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: /health/live
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: traffic-port
+spec:
+  type: LoadBalancer
+  # The default on an EKS Auto Mode cluster, written out so the manifest says
+  # which controller owns this load balancer.
+  loadBalancerClass: eks.amazonaws.com/nlb
+  selector:
+    app: inventory-api
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP

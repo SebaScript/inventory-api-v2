@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-api
+  namespace: inventory
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: inventory-api
+  template:
+    metadata:
+      labels:
+        app: inventory-api
+    spec:
+      serviceAccountName: inventory-api
+      # Long enough for the drain in HealthController plus the server close.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api
+          # Replace with your own registry path before applying.
+          image: REPLACE_WITH_YOUR_ECR_REPOSITORY:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: inventory-api
+            - secretRef:
+                name: inventory-api
+          # Startup is variable, so the slow start is handled here instead of
+          # with a long initial delay on the liveness probe.
+          startupProbe:
+            httpGet: { path: /health/live, port: 3000 }
+            periodSeconds: 2
+            failureThreshold: 45
+          # Liveness never touches the database on purpose: a database outage
+          # must not restart every replica.
+          livenessProbe:
+            httpGet: { path: /health/live, port: 3000 }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 3000 }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          # The filesystem is read only, so give the process somewhere to write
+          # if a library ever needs a scratch file.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

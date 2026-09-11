@@ -12,6 +12,9 @@ junit.xml
 .env.*
 !.env.example
 
+# Filled-in Kubernetes config: it carries the database password
+deploy/config.yaml
+
 logs/
 *.log
 npm-debug.log*

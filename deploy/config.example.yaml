@@ -1,0 +1,32 @@
+# Copy to config.yaml, fill in the real values and apply. config.yaml is ignored
+# by git: the Secret below holds a database password.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inventory-api
+  namespace: inventory
+data:
+  NODE_ENV: production
+  PORT: '3000'
+  # Managed PostgreSQL refuses plaintext connections.
+  DB_SSL: 'true'
+  # Off after the first rollout has created the schema: two replicas building it
+  # at the same time race each other.
+  DB_SYNC: 'false'
+  AWS_REGION: us-east-1
+  S3_BUCKET: REPLACE_WITH_YOUR_BUCKET
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: inventory-api
+  namespace: inventory
+type: Opaque
+stringData:
+  # No `sslmode` in this URL. node-postgres merges the connection string over
+  # the driver options, so an sslmode here would silently override DB_SSL and
+  # the pod would fail to start against a managed database.
+  DATABASE_URL: postgres://USER:PASSWORD@YOUR-DB-ENDPOINT:5432/inventory
+  # Leave empty to run with the cache disabled: the API still works, it just
+  # reads the database every time.
+  REDIS_URL: redis://YOUR-CACHE-ENDPOINT:6379
