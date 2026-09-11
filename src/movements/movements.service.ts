@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { CacheService, ITEMS_NAMESPACE } from '../cache/cache.service';
 import {
   InsufficientStockException,
   ItemDiscontinuedException,
@@ -17,10 +18,11 @@ export class MovementsService {
   constructor(
     @InjectRepository(Movement) private readonly movements: Repository<Movement>,
     private readonly dataSource: DataSource,
+    private readonly cache: CacheService,
   ) {}
 
   async create(dto: CreateMovementDto): Promise<Movement> {
-    return this.dataSource.transaction(async (manager) => {
+    const movement = await this.dataSource.transaction(async (manager) => {
       const item = await manager
         .createQueryBuilder(Item, 'item')
         .setLock('pessimistic_write')
@@ -40,6 +42,11 @@ export class MovementsService {
       await manager.update(Item, item.id, { quantity: resultingStock });
       return manager.save(manager.create(Movement, { ...dto, resultingStock }));
     });
+
+    // A movement changes the stock, which also moves the item in and out of the
+    // lowStock filter, so every cached listing is now suspect.
+    await this.cache.bump(ITEMS_NAMESPACE);
+    return movement;
   }
 
   async findAll(query: FindMovementsDto): Promise<Paginated<Movement>> {

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Not, Repository, SelectQueryBuilder } from 'typeorm';
+import { CacheService, ITEMS_NAMESPACE } from '../cache/cache.service';
 import {
   DuplicateSkuException,
   GroupNotFoundException,
@@ -24,6 +25,7 @@ export class ItemsService {
     @InjectRepository(Item) private readonly items: Repository<Item>,
     @InjectRepository(Group) private readonly groups: Repository<Group>,
     private readonly dataSource: DataSource,
+    private readonly cache: CacheService,
   ) {}
 
   /** Opening stock becomes an IN movement, so the ledger explains every unit. */
@@ -33,13 +35,13 @@ export class ItemsService {
 
     const opening = dto.quantity ?? 0;
 
-    return this.dataSource.transaction(async (manager) => {
-      const item = await manager.save(manager.create(Item, { ...dto, quantity: opening }));
+    const item = await this.dataSource.transaction(async (manager) => {
+      const created = await manager.save(manager.create(Item, { ...dto, quantity: opening }));
 
       if (opening > 0) {
         await manager.save(
           manager.create(Movement, {
-            itemId: item.id,
+            itemId: created.id,
             type: MovementType.IN,
             quantity: opening,
             reason: 'Opening stock',
@@ -47,8 +49,11 @@ export class ItemsService {
           }),
         );
       }
-      return item;
+      return created;
     });
+
+    await this.cache.bump(ITEMS_NAMESPACE);
+    return item;
   }
 
   async findAll(query: FindItemsDto): Promise<Paginated<Item>> {
@@ -97,6 +102,7 @@ export class ItemsService {
     if (dto.sku) await this.assertSkuIsFree(dto.sku, id);
 
     await this.items.update(id, dto);
+    await this.cache.bump(ITEMS_NAMESPACE);
     return this.findOne(id);
   }
 
@@ -104,6 +110,7 @@ export class ItemsService {
   async discontinue(id: number): Promise<void> {
     await this.findOne(id);
     await this.items.update(id, { status: ItemStatus.DISCONTINUED });
+    await this.cache.bump(ITEMS_NAMESPACE);
   }
 
   private async paginate(

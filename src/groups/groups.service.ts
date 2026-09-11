@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Not, Repository } from 'typeorm';
+import { CacheService, ITEMS_NAMESPACE } from '../cache/cache.service';
 import {
   DuplicateNameException,
   GroupNotEmptyException,
@@ -16,6 +17,7 @@ export class GroupsService {
   constructor(
     @InjectRepository(Group) private readonly groups: Repository<Group>,
     @InjectRepository(Item) private readonly items: Repository<Item>,
+    private readonly cache: CacheService,
   ) {}
 
   async create(dto: CreateGroupDto): Promise<Group> {
@@ -44,6 +46,9 @@ export class GroupsService {
     await this.findOne(id);
     if (dto.name) await this.assertNameIsFree(dto.name, id);
     await this.groups.update(id, dto);
+    // Cached item listings embed the joined group, so a rename here would stay
+    // invisible until the entry expired.
+    await this.cache.bump(ITEMS_NAMESPACE);
     return this.findOne(id);
   }
 
