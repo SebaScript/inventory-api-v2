@@ -31,7 +31,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const { status, code, message, extra } = this.describe(exception);
 
     if (status >= 500) {
-      this.logger.error(`${request.method} ${request.url}`, exception as Error);
+      // One argument, one log event. Passing the error as a second argument
+      // makes Nest emit two separate events and drop the stack field, which
+      // leaves nothing to correlate them by but the timestamp.
+      this.logger.error({
+        method: request.method,
+        url: request.url,
+        statusCode: status,
+        code,
+        stack: exception instanceof Error ? exception.stack : String(exception),
+      });
     }
 
     response.status(status).json({
