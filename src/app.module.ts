@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { config } from 'dotenv';
+import { CacheModule } from './cache/cache.module';
+import { ExportsModule } from './exports/exports.module';
 import { GroupsModule } from './groups/groups.module';
 import { HealthController } from './health.controller';
 import { ItemsModule } from './items/items.module';
@@ -16,13 +18,23 @@ config({ quiet: true });
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
+      // Managed PostgreSQL refuses plaintext connections; a local one has no
+      // certificate at all. Never put `sslmode` in DATABASE_URL: node-postgres
+      // merges the connection string over this option, so the string would win
+      // and this setting would be silently ignored.
+      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
       entities: [Group, Item, Movement],
-      synchronize: true,
+      // Building the schema from the entities is this project's substitute for
+      // migrations. Two replicas doing it at once race each other, so the
+      // deployment turns it off once the schema exists.
+      synchronize: process.env.DB_SYNC !== 'false',
       logging: ['error'],
     }),
+    CacheModule,
     GroupsModule,
     ItemsModule,
     MovementsModule,
+    ExportsModule,
   ],
   controllers: [HealthController],
 })
