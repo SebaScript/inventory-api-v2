@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 
 export class GroupNotFoundException extends NotFoundException {
   constructor(id: number) {
@@ -47,6 +47,15 @@ export class GroupNotEmptyException extends ConflictException {
     super({
       code: 'GROUP_NOT_EMPTY',
       message: `Group ${id} still has items. Move or delete them before deleting the group.`,
+    });
+  }
+}
+
+export class ExportUnavailableException extends ServiceUnavailableException {
+  constructor() {
+    super({
+      code: 'EXPORT_UNAVAILABLE',
+      message: 'Object storage is not configured, so the inventory cannot be exported',
     });
   }
 }
