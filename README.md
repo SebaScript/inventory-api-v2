@@ -214,6 +214,34 @@ container and its volume.
 | `test/errors.spec.ts` | Error shape, database error mapping, no leaks in production |
 | `test/app.spec.ts` | Health check, OpenAPI document, demo data consistency |
 | `test/v2.spec.ts` | The `/v2` surface, shared data, QUERY under v2, the Swagger tags |
+| `test/health.spec.ts` | Liveness surviving a database outage while readiness fails |
+| `test/cache.spec.ts` | Cache keys, the fallback with no cache server, invalidation |
+| `test/exports.spec.ts` | CSV escaping, the metric document, the unconfigured export |
+
+Every cloud-backed feature is off when its variable is unset, so the whole suite
+runs with nothing but PostgreSQL.
+
+## Deploying to a cluster
+
+`deploy/` holds the Kubernetes manifests: a Deployment with real probes, an
+internal load balancer, and a one-off Job that creates the schema and loads the
+demo data. Three optional features switch on through the environment:
+
+| Variable | Off means | On adds |
+|---|---|---|
+| `DB_SSL` | plaintext connection, as a local database expects | TLS, which a managed database requires |
+| `REDIS_URL` | every listing reads the database | `GET /v2/items` served from a distributed cache |
+| `S3_BUCKET` | `POST /v2/exports/items` answers `503` | a CSV snapshot in object storage, behind a presigned link |
+
+Two probes rather than one, because they answer different questions.
+`/health/live` never touches the database: a liveness probe that does turns a
+brief database outage into a restart of every replica. `/health/ready` does
+check it, and starts failing the moment the process is asked to shut down, so
+the load balancer stops sending it new work before the socket closes.
+
+In production the application logs one JSON object per line and publishes a
+cache hit-ratio metric in CloudWatch Embedded Metric Format — written to stdout,
+so it needs no metrics SDK, no API call in the request path and no credentials.
 
 ## Scripts
 
