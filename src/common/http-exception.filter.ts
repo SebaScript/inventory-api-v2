@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { QueryFailedError } from 'typeorm';
+import { correlationIdOf } from './correlation';
 
 /** PostgreSQL error codes worth translating into a meaningful status. */
 const UNIQUE_VIOLATION = '23505';
@@ -39,6 +40,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
         url: request.url,
         statusCode: status,
         code,
+        // Ties this failure to the same request as seen by the caller and by
+        // any service in front of it.
+        correlationId: correlationIdOf(request),
         stack: exception instanceof Error ? exception.stack : String(exception),
       });
     }
