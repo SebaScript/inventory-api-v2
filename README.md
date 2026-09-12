@@ -217,6 +217,7 @@ container and its volume.
 | `test/health.spec.ts` | Liveness surviving a database outage while readiness fails |
 | `test/cache.spec.ts` | Cache keys, the fallback with no cache server, invalidation |
 | `test/exports.spec.ts` | CSV escaping, the metric document, the unconfigured export |
+| `test/observability.spec.ts` | Correlation, the route labels, probes staying out of the metrics |
 
 Every cloud-backed feature is off when its variable is unset, so the whole suite
 runs with nothing but PostgreSQL.
@@ -242,6 +243,28 @@ the load balancer stops sending it new work before the socket closes.
 In production the application logs one JSON object per line and publishes a
 cache hit-ratio metric in CloudWatch Embedded Metric Format — written to stdout,
 so it needs no metrics SDK, no API call in the request path and no credentials.
+
+## Behind a gateway or an orchestrator
+
+The API is a well-behaved downstream service, and nothing below changes how it
+answers when it is called directly.
+
+**Every request carries a correlation id.** `X-Correlation-Id` is honoured when
+the caller sends one, `X-Request-Id` is accepted as an alias, and one is
+generated when neither is present. It comes back on the response and appears in
+both the access log and the error log, which is the only way a call is
+traceable once it has crossed a service boundary.
+
+**`GET /metrics` publishes Prometheus metrics** for an external collector:
+request counts and durations, cache hits and misses, and the usual process
+metrics. Two deliberate choices there: the `route` label is the route pattern,
+never the resolved URL, so item ids cannot multiply the time series; and health
+probes and the scrape itself are left out, so a kubelet polling every ten
+seconds cannot drown the real traffic.
+
+Not yet done, and worth knowing before putting a retrying orchestrator in
+front: writes are **not idempotent**. A retried `POST /movements` moves the
+stock twice.
 
 ## Scripts
 
