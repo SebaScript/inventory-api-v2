@@ -1,11 +1,14 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { config } from 'dotenv';
 import { CacheModule } from './cache/cache.module';
+import { CorrelationMiddleware } from './common/correlation';
 import { ExportsModule } from './exports/exports.module';
 import { GroupsModule } from './groups/groups.module';
 import { HealthController } from './health.controller';
 import { ItemsModule } from './items/items.module';
+import { MetricsController } from './metrics/metrics.controller';
+import { HttpMetricsMiddleware } from './metrics/http-metrics.middleware';
 import { MovementsModule } from './movements/movements.module';
 import { Group } from './entities/group.entity';
 import { Item } from './entities/item.entity';
@@ -36,6 +39,12 @@ config({ quiet: true });
     MovementsModule,
     ExportsModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, MetricsController],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Correlation runs first, so the access log and the error log can both
+    // quote the same id.
+    consumer.apply(CorrelationMiddleware, HttpMetricsMiddleware).forRoutes('*');
+  }
+}
