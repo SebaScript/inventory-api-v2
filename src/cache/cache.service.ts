@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 import Redis from 'ioredis';
 import { emitCacheMetrics } from '../common/metrics';
+import { cacheHits, cacheMisses } from '../metrics/registry';
 
 /**
  * Namespaces are the unit of invalidation. Declared here, next to the cache, so
@@ -86,11 +87,13 @@ export class CacheService implements OnApplicationShutdown {
         // An entry written before the last invalidation is a miss, not a value.
         if (entry.e === current) {
           this.hits += 1;
+          cacheHits.inc();
           return { value: entry.d as T, epoch: current };
         }
       }
 
       this.misses += 1;
+      cacheMisses.inc();
       return { epoch: current };
     } catch (error) {
       this.logThrottled(error as Error);
