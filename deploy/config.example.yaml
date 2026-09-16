@@ -15,6 +15,11 @@ data:
   DB_SYNC: 'false'
   AWS_REGION: us-east-1
   S3_BUCKET: REPLACE_WITH_YOUR_BUCKET
+  # The other cloud. Leave both empty until the orchestrator exists: the API
+  # then reports the partner lookup as `disabled` and works exactly as before.
+  ORCHESTRATOR_URL: ''
+  PARTNER_KEY: ''
+  INTEROP_TIMEOUT_MS: '1500'
 ---
 apiVersion: v1
 kind: Secret
@@ -30,3 +35,6 @@ stringData:
   # Leave empty to run with the cache disabled: the API still works, it just
   # reads the database every time.
   REDIS_URL: redis://YOUR-CACHE-ENDPOINT:6379
+  # Only if the orchestrator requires a key. Lives in the Secret, not the
+  # ConfigMap, because it is a credential.
+  ORCHESTRATOR_API_KEY: ''
