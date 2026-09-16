@@ -37,12 +37,19 @@ describe('API v2', () => {
     await api.get('/v2/items/999').expect(404);
   });
 
-  it('reads and writes the same data as the unversioned API', async () => {
+  it('reads and writes the same data as the unversioned API, and adds to it', async () => {
     await api.post('/groups').send({ name: 'Office' }).expect(201);
     await api.post('/v2/items').send({ groupId: 1, name: 'Paper', sku: 'P1' }).expect(201);
 
-    const v1 = await api.get('/items/1').expect(200);
-    expect((await api.get('/v2/items/1').expect(200)).body).toEqual(v1.body);
+    const v1 = (await api.get('/items/1').expect(200)).body;
+    const { partner, ...v2 } = (await api.get('/v2/items/1').expect(200)).body;
+
+    // Same record, same source of truth.
+    expect(v2).toEqual(v1);
+    // And the divergence the version exists for: v2 reaches the other cloud,
+    // the unversioned API deliberately does not.
+    expect(partner).toEqual({ status: 'disabled', record: null });
+    expect(v1).not.toHaveProperty('partner');
   });
 
   it('answers the QUERY verb under /v2 too, with its POST alias', async () => {
