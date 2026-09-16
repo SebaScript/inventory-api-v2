@@ -6,6 +6,7 @@ import { CorrelationMiddleware } from './common/correlation';
 import { ExportsModule } from './exports/exports.module';
 import { GroupsModule } from './groups/groups.module';
 import { HealthController } from './health.controller';
+import { InteropModule } from './interop/interop.module';
 import { ItemsModule } from './items/items.module';
 import { MetricsController } from './metrics/metrics.controller';
 import { HttpMetricsMiddleware } from './metrics/http-metrics.middleware';
@@ -38,6 +39,7 @@ config({ quiet: true });
     ItemsModule,
     MovementsModule,
     ExportsModule,
+    InteropModule,
   ],
   controllers: [HealthController, MetricsController],
 })
