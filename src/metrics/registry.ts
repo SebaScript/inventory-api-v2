@@ -43,3 +43,10 @@ export const cacheMisses = new Counter({
   help: 'Listings that had to be read from the database',
   registers: [registry],
 });
+
+export const partnerLookups = new Counter({
+  name: 'partner_lookups_total',
+  help: 'Calls to the other cloud through the orchestrator, by outcome',
+  labelNames: ['outcome'] as const,
+  registers: [registry],
+});
