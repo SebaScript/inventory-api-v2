@@ -30,10 +30,10 @@ Versioning is NestJS URI versioning. The original controllers are declared
 version **neutral**, so their paths did not change; only a controller that
 declares a version gets a prefix.
 
-| | Base path | Declared as |
-|---|---|---|
-| Original | `/groups`, `/items`, `/movements` | version neutral |
-| v2 | `/v2/groups`, `/v2/items`, `/v2/movements` | `version: '2'` |
+|          | Base path                                  | Declared as     |
+| -------- | ------------------------------------------ | --------------- |
+| Original | `/groups`, `/items`, `/movements`          | version neutral |
+| v2       | `/v2/groups`, `/v2/items`, `/v2/movements` | `version: '2'`  |
 
 Both versions read and write the same database through the same services, so a
 record created through one is immediately visible from the other.
@@ -69,27 +69,27 @@ identical behaviour.
 
 A group is a category. It is the dimension items are classified by.
 
-| Method | Path | What it does |
-|---|---|---|
-| `POST` | `/groups` | Creates a category. The name is unique, case insensitive |
-| `GET` | `/groups` | Lists categories, paginated. `?search` matches the name |
-| `GET` | `/groups/:id` | Returns one category |
-| `PATCH` | `/groups/:id` | Updates only the fields that were sent; the rest stay as they are |
-| `DELETE` | `/groups/:id` | Deletes it, but only if it is empty — otherwise `409` |
+| Method   | Path          | What it does                                                      |
+| -------- | ------------- | ----------------------------------------------------------------- |
+| `POST`   | `/groups`     | Creates a category. The name is unique, case insensitive          |
+| `GET`    | `/groups`     | Lists categories, paginated. `?search` matches the name           |
+| `GET`    | `/groups/:id` | Returns one category                                              |
+| `PATCH`  | `/groups/:id` | Updates only the fields that were sent; the rest stay as they are |
+| `DELETE` | `/groups/:id` | Deletes it, but only if it is empty — otherwise `409`             |
 
 ### Items: `/items`
 
 An item is a product. It holds the **current state**: how much stock there is right now.
 
-| Method | Path | What it does |
-|---|---|---|
-| `POST` | `/items` | Creates a product inside a category. An optional opening stock is written as an `IN` movement, so even the first units have a ledger entry |
-| `GET` | `/items` | Lists products with their category. Filters: `?search` (name or SKU), `?groupId`, `?lowStock`, `?status` |
-| **`QUERY`** | **`/items/search`** | Advanced search whose filter travels in the **body**: free text, a *list* of categories and a price range |
-| `POST` | `/items/search` | The same search, for clients and tools that cannot send the QUERY verb |
-| `GET` | `/items/:id` | Returns one product, discontinued ones included |
-| `PATCH` | `/items/:id` | Updates only the fields that were sent. The stock is never one of them. Also brings a product back with `{"status":"ACTIVE"}` |
-| `DELETE` | `/items/:id` | **Discontinues** it: it leaves the listings and accepts no more movements, but neither it nor its history is erased |
+| Method      | Path                | What it does                                                                                                                               |
+| ----------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST`      | `/items`            | Creates a product inside a category. An optional opening stock is written as an `IN` movement, so even the first units have a ledger entry |
+| `GET`       | `/items`            | Lists products with their category. Filters: `?search` (name or SKU), `?groupId`, `?lowStock`, `?status`                                   |
+| **`QUERY`** | **`/items/search`** | Advanced search whose filter travels in the **body**: free text, a _list_ of categories and a price range                                  |
+| `POST`      | `/items/search`     | The same search, for clients and tools that cannot send the QUERY verb                                                                     |
+| `GET`       | `/items/:id`        | Returns one product, discontinued ones included                                                                                            |
+| `PATCH`     | `/items/:id`        | Updates only the fields that were sent. The stock is never one of them. Also brings a product back with `{"status":"ACTIVE"}`              |
+| `DELETE`    | `/items/:id`        | **Discontinues** it: it leaves the listings and accepts no more movements, but neither it nor its history is erased                        |
 
 `QUERY` is a real HTTP method, safe and idempotent like `GET` but carrying a
 request body. OpenAPI 3.0 has a closed list of methods that does not include
@@ -101,17 +101,17 @@ alias for clients that cannot send the verb. Both exist under `/v2` too.
 
 A movement is an entry or exit of stock. It is the **immutable event log** that explains every unit — hence no `PUT`, `PATCH` or `DELETE`. A mistake is corrected with an opposite movement.
 
-| Method | Path | What it does |
-|---|---|---|
-| `POST` | `/movements` | Records an `IN` or `OUT` **and** updates the item's stock in a single transaction, with the row locked. `409` if there is not enough stock, and then nothing is written |
-| `GET` | `/movements` | Lists the ledger, newest first. Filters: `?itemId`, `?type` |
-| `GET` | `/movements/:id` | Returns one entry together with its product |
+| Method | Path             | What it does                                                                                                                                                            |
+| ------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST` | `/movements`     | Records an `IN` or `OUT` **and** updates the item's stock in a single transaction, with the row locked. `409` if there is not enough stock, and then nothing is written |
+| `GET`  | `/movements`     | Lists the ledger, newest first. Filters: `?itemId`, `?type`                                                                                                             |
+| `GET`  | `/movements/:id` | Returns one entry together with its product                                                                                                                             |
 
 ### Health: `/health`
 
-| Method | Path | What it does |
-|---|---|---|
-| `GET` | `/health` | Runs a real query against PostgreSQL. `503` if the database is unreachable |
+| Method | Path      | What it does                                                               |
+| ------ | --------- | -------------------------------------------------------------------------- |
+| `GET`  | `/health` | Runs a real query against PostgreSQL. `503` if the database is unreachable |
 
 ### Errors
 
@@ -125,18 +125,18 @@ Every failure has the same shape. Branch on `code`, not on `message`.
   "available": 75,
   "requested": 99999,
   "path": "/movements",
-  "timestamp": "2026-08-18T15:29:44.337Z"
+  "timestamp": "2026-08-18T15:29:44.337Z",
 }
 ```
 
-| Status | When |
-|---|---|
-| `400` | Validation failed (body, params, query) |
-| `404` | The resource does not exist |
-| `409` | Duplicate name/SKU, non-empty group, discontinued item, **insufficient stock** |
-| `422` | A database rule was broken |
-| `500` | Unexpected — generic message only, details go to the log |
-| `503` | Health check: PostgreSQL unreachable |
+| Status | When                                                                           |
+| ------ | ------------------------------------------------------------------------------ |
+| `400`  | Validation failed (body, params, query)                                        |
+| `404`  | The resource does not exist                                                    |
+| `409`  | Duplicate name/SKU, non-empty group, discontinued item, **insufficient stock** |
+| `422`  | A database rule was broken                                                     |
+| `500`  | Unexpected — generic message only, details go to the log                       |
+| `503`  | Health check: PostgreSQL unreachable                                           |
 
 In production an unexpected error returns only `"Internal server error"`. A test asserts that a thrown error containing a password never appears in the response.
 
@@ -156,14 +156,14 @@ In production an unexpected error returns only `"Internal server error"`. A test
                 ON DELETE RESTRICT            ON DELETE RESTRICT
 ```
 
-| Rule | Why |
-|---|---|
-| `UNIQUE` name on groups | One category per name; the API also compares case-insensitively |
-| `UNIQUE` sku (stored uppercase) | Makes SKU uniqueness real, not cosmetic |
-| `CHECK (quantity >= 0)` | The invariant's last line of defence |
-| `CHECK (quantity > 0)` on movements | Direction comes from `type`, never from a sign |
-| `ON DELETE RESTRICT` groups → items | Deleting a category must not destroy inventory |
-| `ON DELETE RESTRICT` items → movements | A movement can never be orphaned; history is permanent |
+| Rule                                   | Why                                                             |
+| -------------------------------------- | --------------------------------------------------------------- |
+| `UNIQUE` name on groups                | One category per name; the API also compares case-insensitively |
+| `UNIQUE` sku (stored uppercase)        | Makes SKU uniqueness real, not cosmetic                         |
+| `CHECK (quantity >= 0)`                | The invariant's last line of defence                            |
+| `CHECK (quantity > 0)` on movements    | Direction comes from `type`, never from a sign                  |
+| `ON DELETE RESTRICT` groups → items    | Deleting a category must not destroy inventory                  |
+| `ON DELETE RESTRICT` items → movements | A movement can never be orphaned; history is permanent          |
 
 The central rule is that an item's stock always equals the sum of its own
 movements, and is never negative. Four layers defend it: the update DTO has no
@@ -174,10 +174,10 @@ and asserts that exactly one of them fails.
 
 ## Docker
 
-| File | What it is |
-|---|---|
-| `Dockerfile` | Two stages: the first compiles and prunes the dev dependencies, the second copies only `node_modules` and `dist`. It runs as the `node` user and carries a `HEALTHCHECK` that calls `/health` |
-| `docker-compose.yml` | Two services: `postgres`, and `api` built from that Dockerfile. The API waits for `service_healthy`, not merely for the container to exist |
+| File                 | What it is                                                                                                                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Dockerfile`         | Two stages: the first compiles and prunes the dev dependencies, the second copies only `node_modules` and `dist`. It runs as the `node` user and carries a `HEALTHCHECK` that calls `/health` |
+| `docker-compose.yml` | Two services: `postgres`, and `api` built from that Dockerfile. The API waits for `service_healthy`, not merely for the container to exist                                                    |
 
 Two details worth knowing, both of which cost an afternoon once:
 
@@ -206,18 +206,19 @@ The tables are truncated between tests, so do not point `DATABASE_URL` at a
 database holding anything you want to keep. `npm run db:down` removes the
 container and its volume.
 
-| File | Covers |
-|---|---|
-| `test/groups.spec.ts` | Group CRUD, uniqueness, delete rules |
-| `test/items.spec.ts` | Item CRUD, filters, **the QUERY endpoint**, discontinuation |
-| `test/movements.spec.ts` | IN, OUT, insufficient stock, **concurrency**, the CHECK constraint |
-| `test/errors.spec.ts` | Error shape, database error mapping, no leaks in production |
-| `test/app.spec.ts` | Health check, OpenAPI document, demo data consistency |
-| `test/v2.spec.ts` | The `/v2` surface, shared data, QUERY under v2, the Swagger tags |
-| `test/health.spec.ts` | Liveness surviving a database outage while readiness fails |
-| `test/cache.spec.ts` | Cache keys, the fallback with no cache server, invalidation |
-| `test/exports.spec.ts` | CSV escaping, the metric document, the unconfigured export |
-| `test/observability.spec.ts` | Correlation, the route labels, probes staying out of the metrics |
+| File                         | Covers                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| `test/groups.spec.ts`        | Group CRUD, uniqueness, delete rules                                           |
+| `test/items.spec.ts`         | Item CRUD, filters, **the QUERY endpoint**, discontinuation                    |
+| `test/movements.spec.ts`     | IN, OUT, insufficient stock, **concurrency**, the CHECK constraint             |
+| `test/errors.spec.ts`        | Error shape, database error mapping, no leaks in production                    |
+| `test/app.spec.ts`           | Health check, OpenAPI document, demo data consistency                          |
+| `test/v2.spec.ts`            | The `/v2` surface, shared data, QUERY under v2, the Swagger tags               |
+| `test/health.spec.ts`        | Liveness surviving a database outage while readiness fails                     |
+| `test/cache.spec.ts`         | Cache keys, the fallback with no cache server, invalidation                    |
+| `test/exports.spec.ts`       | CSV escaping, the metric document, the unconfigured export                     |
+| `test/observability.spec.ts` | Correlation, the route labels, probes staying out of the metrics               |
+| `test/interop.spec.ts`       | The shared record shape, randomness, and every way the partner lookup degrades |
 
 Every cloud-backed feature is off when its variable is unset, so the whole suite
 runs with nothing but PostgreSQL.
@@ -228,11 +229,11 @@ runs with nothing but PostgreSQL.
 internal load balancer, and a one-off Job that creates the schema and loads the
 demo data. Three optional features switch on through the environment:
 
-| Variable | Off means | On adds |
-|---|---|---|
-| `DB_SSL` | plaintext connection, as a local database expects | TLS, which a managed database requires |
-| `REDIS_URL` | every listing reads the database | `GET /v2/items` served from a distributed cache |
-| `S3_BUCKET` | `POST /v2/exports/items` answers `503` | a CSV snapshot in object storage, behind a presigned link |
+| Variable    | Off means                                         | On adds                                                   |
+| ----------- | ------------------------------------------------- | --------------------------------------------------------- |
+| `DB_SSL`    | plaintext connection, as a local database expects | TLS, which a managed database requires                    |
+| `REDIS_URL` | every listing reads the database                  | `GET /v2/items` served from a distributed cache           |
+| `S3_BUCKET` | `POST /v2/exports/items` answers `503`            | a CSV snapshot in object storage, behind a presigned link |
 
 Two probes rather than one, because they answer different questions.
 `/health/live` never touches the database: a liveness probe that does turns a
@@ -262,20 +263,35 @@ never the resolved URL, so item ids cannot multiply the time series; and health
 probes and the scrape itself are left out, so a kubelet polling every ten
 seconds cannot drown the real traffic.
 
+**Two routes make up the cross-service contract.** `GET /v2/interop/random`
+hands one record to whoever asks, in a deliberately domain-agnostic shape
+(`source`, `kind`, `id`, `label`, `attributes`, `retrievedAt`) so neither side
+has to model the other. And `GET /v2/items/:id` returns the item plus a
+`partner` block holding a record fetched from the other service through the
+orchestrator.
+
+That lookup is never allowed to matter. It reports `ok`, `unavailable` or
+`disabled` rather than throwing, runs behind a short timeout, and happens only
+after the local read has succeeded — an unknown id still 404s without anyone
+else being called. Every failure mode is covered by a test, and with
+`ORCHESTRATOR_URL` unset the whole thing reports `disabled` and the API behaves
+exactly as it always has. The unversioned `GET /items/:id` is untouched: this is
+the first real divergence the `/v2` surface was built for.
+
 Not yet done, and worth knowing before putting a retrying orchestrator in
 front: writes are **not idempotent**. A retried `POST /movements` moves the
 stock twice.
 
 ## Scripts
 
-| Command | What it does |
-|---|---|
+| Command              | What it does                                        |
+| -------------------- | --------------------------------------------------- |
 | `npm run docker:dev` | Builds and raises the whole stack, API and database |
-| `npm run db:up` | Raises only PostgreSQL, on `localhost:5433` |
-| `npm run db:down` | Tears the stack down, volume included |
-| `npm run start:dev` | Runs the API on the host, with reload |
-| `npm run build` | Compiles to `dist/` |
-| `npm test` | Runs the suite |
-| `npm run lint` | ESLint over `src` and `test` |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run format` | Prettier over `src` and `test` |
+| `npm run db:up`      | Raises only PostgreSQL, on `localhost:5433`         |
+| `npm run db:down`    | Tears the stack down, volume included               |
+| `npm run start:dev`  | Runs the API on the host, with reload               |
+| `npm run build`      | Compiles to `dist/`                                 |
+| `npm test`           | Runs the suite                                      |
+| `npm run lint`       | ESLint over `src` and `test`                        |
+| `npm run typecheck`  | `tsc --noEmit`                                      |
+| `npm run format`     | Prettier over `src` and `test`                      |
