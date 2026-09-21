@@ -1,0 +1,45 @@
+# Prometheus + Grafana for the inventory API, run locally.
+#
+#   cd observability
+#   docker compose up -d
+#
+#   Grafana     http://localhost:3001   (admin / admin)
+#   Prometheus  http://localhost:9090   (check /targets first)
+#
+# Port 3001 on purpose: 3000 is where the API itself runs locally.
+#
+# Both the data source and the dashboard are provisioned from files, so there
+# is nothing to click after starting: the panels are already there.
+
+services:
+  prometheus:
+    image: prom/prometheus
+    container_name: inventory-prometheus
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana
+    container_name: inventory-grafana
+    ports:
+      - '3001:3000'
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # Skips the "add your first data source" wizard: it is wired below.
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      # Opens straight on the dashboard instead of the welcome page.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/inventory/inventory.json
+    volumes:
+      - ./grafana-datasource.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+      - ./grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/provider.yml:ro
+      - ./dashboards:/etc/grafana/provisioning/dashboards/inventory:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  grafana-data:
