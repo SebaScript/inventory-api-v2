@@ -1,3 +1,6 @@
+# Copy to seed-job.yaml, replace the image, and apply that copy.
+# seed-job.yaml is ignored by git, same reason as deployment.yaml.
+#
 # Run once, BEFORE the Deployment, and only once.
 #   kubectl apply -f deploy/seed-job.yaml
 #   kubectl wait --for=condition=complete job/inventory-seed -n inventory --timeout=300s
