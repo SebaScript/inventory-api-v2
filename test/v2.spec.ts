@@ -66,6 +66,19 @@ describe('API v2', () => {
     await query(app, '/v2/items/search').send({ nope: true }).expect(400);
   });
 
+  it('answers under /api/v2 as well, without moving the /v2 routes', async () => {
+    await api.post('/v2/groups').send({ name: 'Office' }).expect(201);
+    await api.post('/api/v2/items').send({ groupId: 1, name: 'Paper', sku: 'P1' }).expect(201);
+
+    const viaV2 = (await api.get('/v2/items/1').expect(200)).body;
+    const viaApiV2 = (await api.get('/api/v2/items/1').expect(200)).body;
+    expect(viaApiV2).toEqual(viaV2);
+
+    // The rewrite is anchored to a version segment, so it leaves the rest alone.
+    await api.get('/api/items/1').expect(404);
+    await api.get('/api/version').expect(404);
+  });
+
   it('documents each version under its own tag, and still not the QUERY verb', async () => {
     const { body } = await api.get('/docs-json').expect(200);
 

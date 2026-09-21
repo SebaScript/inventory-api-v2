@@ -8,6 +8,7 @@ import {
 import { NestFactory } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
+import { apiAlias } from './common/api-alias';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 import { seed } from './database/seed';
 import { setupSwagger } from './swagger';
@@ -23,6 +24,9 @@ async function bootstrap(): Promise<void> {
   });
 
   const logger = new Logger('Bootstrap');
+
+  // Before the router, so `/api/v2/...` reaches the same handlers as `/v2/...`.
+  app.use(apiAlias);
 
   // The original API keeps its bare paths, so nothing that already calls it
   // breaks; only the controllers that declare a version get a `/vN` prefix.

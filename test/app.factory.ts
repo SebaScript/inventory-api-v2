@@ -4,6 +4,7 @@ import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { CacheService } from '../src/cache/cache.service';
+import { apiAlias } from '../src/common/api-alias';
 import { HttpExceptionFilter } from '../src/common/http-exception.filter';
 import { setupSwagger } from '../src/swagger';
 
@@ -20,6 +21,7 @@ export async function createApp(cache?: CacheService): Promise<{
   const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication({ logger: false });
+  app.use(apiAlias);
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: VERSION_NEUTRAL });
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
