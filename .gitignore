@@ -43,3 +43,6 @@ postman/
 
 # Local working context for AI agents, never synced
 CLAUDE.local.md
+
+# Course material: rubrics and briefs live next to the repo, not in it
+*.pdf
