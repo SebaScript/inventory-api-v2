@@ -24,6 +24,69 @@ boot (`synchronize: true`), which is convenient here and would be dangerous on
 a database holding real data. `SEED=true` loads demo data, and the application
 refuses to seed whenever `NODE_ENV=production`.
 
+## Architecture
+
+Two APIs, two clouds, one orchestrator between them. Each API is deployed whole
+in its own provider and neither holds a copy of the other's data: a record from
+the other side is fetched over HTTP, in real time, through the orchestrator.
+
+```mermaid
+flowchart LR
+  client([Client])
+
+  subgraph AWS["AWS &mdash; operated by SebaScript"]
+    gw[API Gateway REST<br/>API key + usage plan]
+    nlb[Internal NLB]
+    subgraph eks["EKS Auto Mode"]
+      pods[inventory-api<br/>2-6 replicas, HPA]
+    end
+    rds[(RDS PostgreSQL)]
+    cache[(ElastiCache Valkey)]
+    s3[(S3 exports)]
+    cw[CloudWatch<br/>logs, metrics, alarm]
+  end
+
+  subgraph GCP["Google Cloud &mdash; operated by the partner"]
+    orch[Orchestrator]
+    queue[["Pub/Sub topic + DLQ"]]
+    orders[orders-api]
+  end
+
+  grafana[Grafana<br/>Prometheus]
+
+  client --> gw --> nlb --> pods
+  pods --> rds & cache & s3
+  pods -.-> cw
+  pods -- "GET /interop/orders/random" --> orch
+  orch --> orders
+  orch --> queue --> orders
+  orch -- "GET /v2/interop/random" --> gw
+  grafana -- "scrapes /metrics/{api}" --> orch
+```
+
+### Who operates what
+
+|                | Cloud        | Owns                                                                                                           |
+| -------------- | ------------ | -------------------------------------------------------------------------------------------------------------- |
+| **SebaScript** | AWS          | `inventory-api` on EKS, RDS, **the cache** (ElastiCache), **the object storage** (S3), API Gateway, CloudWatch |
+| **Partner**    | Google Cloud | `orders-api`, **the orchestrator**, **the queue** (Pub/Sub + dead-letter topic)                                |
+
+The group is two people rather than three, so the transversal components split
+two-one instead of one-one-one. Each complete API still lives in a different
+provider, and no component is duplicated across clouds.
+
+### Why these services
+
+| Need                            | Service              | Why this one                                                                                                                                         |
+| ------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API key that cannot be bypassed | API Gateway **REST** | API keys and usage plans exist only in REST APIs, not HTTP APIs. The NLB behind it is internal, so the key cannot be skipped by calling the balancer |
+| Kubernetes                      | EKS **Auto Mode**    | Ships the load balancer controller, Pod Identity and the node monitoring agent. Fargate runs no DaemonSets, which rules out all three                |
+| Database                        | RDS PostgreSQL       | The engine the app already speaks. Forces TLS from version 15                                                                                        |
+| Cache                           | ElastiCache Valkey   | Shared by every replica, so a record fetched from the other cloud is reused across pods                                                              |
+| Object storage                  | S3                   | Private bucket, reached through presigned URLs, so no object is ever public                                                                          |
+| Monitoring in our own cloud     | CloudWatch           | Native, and the metric is written in EMF: no SDK, no API calls, no IAM permissions                                                                   |
+| Monitoring across clouds        | Prometheus + Grafana | Open format, works in any provider, and reads both APIs through one orchestrator path                                                                |
+
 ## Versions
 
 Versioning is NestJS URI versioning. The original controllers are declared
@@ -34,9 +97,15 @@ declares a version gets a prefix.
 | -------- | ------------------------------------------ | --------------- |
 | Original | `/groups`, `/items`, `/movements`          | version neutral |
 | v2       | `/v2/groups`, `/v2/items`, `/v2/movements` | `version: '2'`  |
+| v2 alias | `/api/v2/...`                              | url rewrite     |
 
 Both versions read and write the same database through the same services, so a
 record created through one is immediately visible from the other.
+
+Everything under `/v2` also answers under **`/api/v2`**. It is a url rewrite
+that runs before the router (`src/common/api-alias.ts`), not a second set of
+routes: both spellings reach the same handler and report the same route
+pattern, so no metric is split in two.
 
 Each resource keeps its routes in a single abstract base controller with no
 path and no version of its own. Both versions mount that base, so `/v2` starts
@@ -229,17 +298,23 @@ runs with nothing but PostgreSQL.
 internal load balancer, and a one-off Job that creates the schema and loads the
 demo data. Three optional features switch on through the environment:
 
-| Variable    | Off means                                         | On adds                                                   |
-| ----------- | ------------------------------------------------- | --------------------------------------------------------- |
-| `DB_SSL`    | plaintext connection, as a local database expects | TLS, which a managed database requires                    |
-| `REDIS_URL` | every listing reads the database                  | `GET /v2/items` served from a distributed cache           |
-| `S3_BUCKET` | `POST /v2/exports/items` answers `503`            | a CSV snapshot in object storage, behind a presigned link |
+| Variable           | Off means                                         | On adds                                                   |
+| ------------------ | ------------------------------------------------- | --------------------------------------------------------- |
+| `DB_SSL`           | plaintext connection, as a local database expects | TLS, which a managed database requires                    |
+| `REDIS_URL`        | every listing reads the database                  | `GET /v2/items` served from a distributed cache           |
+| `S3_BUCKET`        | `POST /v2/exports/items` answers `503`            | a CSV snapshot in object storage, behind a presigned link |
+| `ORCHESTRATOR_URL` | `partner` reports `disabled`, nothing is called   | records fetched live from the other cloud                 |
 
 Two probes rather than one, because they answer different questions.
 `/health/live` never touches the database: a liveness probe that does turns a
 brief database outage into a restart of every replica. `/health/ready` does
 check it, and starts failing the moment the process is asked to shut down, so
 the load balancer stops sending it new work before the socket closes.
+
+`deploy/hpa.yaml` adds horizontal autoscaling on CPU, from 2 replicas to 6.
+The floor stays at 2 on purpose: an autoscaler allowed to reach one replica
+would quietly undo the redundancy it was added to protect. It needs
+metrics-server, which EKS Auto Mode does not ship.
 
 In production the application logs one JSON object per line and publishes a
 cache hit-ratio metric in CloudWatch Embedded Metric Format — written to stdout,
@@ -277,6 +352,13 @@ else being called. Every failure mode is covered by a test, and with
 `ORCHESTRATOR_URL` unset the whole thing reports `disabled` and the API behaves
 exactly as it always has. The unversioned `GET /items/:id` is untouched: this is
 the first real divergence the `/v2` surface was built for.
+
+**The partner record is cached, and only when it is good.** A successful lookup is stored for `PARTNER_CACHE_TTL_SECONDS` (30 by default) in its own
+cache namespace, so a burst of reads is one cross-cloud call rather than one
+each. A failure is never stored: caching an outage would make it outlive
+itself. Expiry bounds how stale a record can get; `DELETE /v2/interop/cache`
+is the way to force a refresh straight away, which is what makes a change
+made on the other side visible immediately instead of up to a TTL later.
 
 Not yet done, and worth knowing before putting a retrying orchestrator in
 front: writes are **not idempotent**. A retried `POST /movements` moves the
