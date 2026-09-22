@@ -18,6 +18,12 @@ spec:
     metadata:
       labels:
         app: inventory-api
+      annotations:
+        # The operator from the amazon-cloudwatch-observability add-on reads
+        # this and injects the OpenTelemetry SDK as an init container. Needs an
+        # Instrumentation resource in the namespace (deploy/instrumentation.yaml);
+        # without one the annotation is silently ignored.
+        instrumentation.opentelemetry.io/inject-nodejs: 'true'
     spec:
       serviceAccountName: inventory-api
       # Long enough for the drain in HealthController plus the server close.
