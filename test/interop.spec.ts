@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { CacheRead, CacheService } from '../src/cache/cache.service';
 import { createApp, reset } from './app.factory';
 
 describe('Interop with the other cloud', () => {
@@ -89,5 +90,109 @@ describe('Interop with the other cloud', () => {
 
     expect(body.paths['/v2/interop/random'].get.tags).toEqual(['Interop v2']);
     expect(body.paths['/v2/items/{id}'].get.summary).toContain('other cloud');
+  });
+});
+/** Same shape as the real service, minus the network. Not a Proxy: a proxy that
+ * answers every property also answers `then`, which hangs the suite silently. */
+class FakeCache {
+  private readonly store = new Map<string, { e: string; d: unknown }>();
+  private readonly epochs = new Map<string, number>();
+
+  enabled = true;
+
+  read<T>(namespace: string, key: string): Promise<CacheRead<T>> {
+    const epoch = String(this.epochs.get(namespace) ?? 0);
+    const entry = this.store.get(`${namespace}:${key}`);
+
+    if (entry && entry.e === epoch) return Promise.resolve({ value: entry.d as T, epoch });
+    return Promise.resolve({ epoch });
+  }
+
+  write(namespace: string, key: string, epoch: string, value: unknown): Promise<void> {
+    this.store.set(`${namespace}:${key}`, { e: epoch, d: JSON.parse(JSON.stringify(value)) });
+    return Promise.resolve();
+  }
+
+  bump(namespace: string): Promise<void> {
+    this.epochs.set(namespace, (this.epochs.get(namespace) ?? 0) + 1);
+    return Promise.resolve();
+  }
+}
+
+describe('Caching what the partner returns', () => {
+  const realFetch = global.fetch;
+  const record = {
+    source: 'orders-api',
+    kind: 'order',
+    id: '7',
+    label: 'Orden SO-0007',
+    attributes: { status: 'RECEIVED' },
+    retrievedAt: '2026-09-20T00:00:00.000Z',
+  };
+
+  let app: INestApplication;
+  let dataSource: DataSource;
+  let api: Awaited<ReturnType<typeof createApp>>['api'];
+  let calls = 0;
+
+  const answerWith = (status: number, body: unknown) => {
+    global.fetch = ((): Promise<Response> => {
+      calls += 1;
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }) as unknown as typeof fetch;
+  };
+
+  beforeAll(async () => {
+    process.env.ORCHESTRATOR_URL = 'http://orchestrator.test';
+    process.env.PARTNER_KEY = 'orders';
+    ({ app, dataSource, api } = await createApp(new FakeCache() as unknown as CacheService));
+  });
+
+  afterAll(async () => {
+    delete process.env.ORCHESTRATOR_URL;
+    delete process.env.PARTNER_KEY;
+    global.fetch = realFetch;
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await reset(dataSource);
+    await api.post('/groups').send({ name: 'Electronics' }).expect(201);
+    await api.post('/items').send({ groupId: 1, name: 'Cable', sku: 'C1' }).expect(201);
+    await api.delete('/v2/interop/cache').expect(200);
+    calls = 0;
+    answerWith(200, record);
+  });
+
+  it('crosses the clouds once and serves the rest from the cache', async () => {
+    const first = await api.get('/v2/items/1').expect(200);
+    expect(first.body.partner).toEqual({ status: 'ok', record });
+
+    await api.get('/v2/items/1').expect(200);
+    await api.get('/v2/items/1').expect(200);
+
+    expect(calls).toBe(1);
+  });
+
+  it('crosses them again once the cache is invalidated', async () => {
+    await api.get('/v2/items/1').expect(200);
+    expect((await api.delete('/v2/interop/cache').expect(200)).body).toEqual({ invalidated: true });
+    await api.get('/v2/items/1').expect(200);
+
+    expect(calls).toBe(2);
+  });
+
+  it('never caches a failure, so an outage does not outlive itself', async () => {
+    answerWith(503, {});
+
+    expect((await api.get('/v2/items/1').expect(200)).body.partner.status).toBe('unavailable');
+    await api.get('/v2/items/1').expect(200);
+
+    expect(calls).toBe(2);
   });
 });
