@@ -8,6 +8,9 @@ import { cacheHits, cacheMisses } from '../metrics/registry';
  * the services that invalidate never have to import from a controller.
  */
 export const ITEMS_NAMESPACE = 'items';
+/** Records fetched from the other cloud. Separate epoch, so invalidating one
+ * does not throw away the other. */
+export const PARTNER_NAMESPACE = 'partner';
 
 /** What a read returns: the value when it is a hit, and always the epoch to write back. */
 export interface CacheRead<T> {
