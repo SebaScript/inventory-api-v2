@@ -2,13 +2,10 @@
   "uid": "inventory-api",
   "title": "Inventory API — multicloud",
   "description": "Scraped through the orchestrator in the other cloud. Counters come from two replicas behind a load balancer, so rates are indicative, not exact.",
-  "tags": [
-    "inventory",
-    "multicloud"
-  ],
+  "tags": ["inventory", "multicloud"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -19,7 +16,7 @@
     {
       "type": "timeseries",
       "title": "Cross-cloud calls",
-      "description": "The one picture that shows the two clouds talking. `ok` means the other API answered; `unavailable` means it was asked and did not.",
+      "description": "`ok` the other API answered, `cached` served from ElastiCache without crossing, `unavailable` asked and no answer.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -46,7 +43,7 @@
           "unit": "reqps",
           "custom": {
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 10,
             "showPoints": "never"
           }
         },
@@ -85,8 +82,7 @@
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
-          },
-          "legendFormat": "target"
+          }
         }
       ],
       "fieldConfig": {
@@ -132,9 +128,7 @@
         "textMode": "value",
         "colorMode": "background",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         }
@@ -142,8 +136,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Requests per second",
-      "description": "",
+      "title": "Request rate by endpoint",
+      "description": "The label is the route pattern, so /v2/items/:id is one series and not one per item.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -156,8 +150,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total[5m]))",
-          "legendFormat": "all routes",
+          "expr": "sum by (route) (rate(http_requests_total[5m]))",
+          "legendFormat": "{{route}}",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -170,7 +164,151 @@
           "unit": "reqps",
           "custom": {
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Error rate by endpoint",
+      "description": "Share of 4xx and 5xx per endpoint. A 404 on a missing item is a client error and counts here too.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (route) (rate(http_requests_total{status=~\"[45]..\"}[5m])) / sum by (route) (rate(http_requests_total[5m]))",
+          "legendFormat": "{{route}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "p50 latency by endpoint",
+      "description": "Half the requests were faster than this. Measured inside the pod.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{route}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "p95 latency by endpoint",
+      "description": "95 % were faster than this. The average would hide exactly the requests worth seeing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{route}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
             "showPoints": "never"
           }
         },
@@ -197,9 +335,9 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 12,
-        "y": 8,
-        "w": 12,
+        "x": 0,
+        "y": 24,
+        "w": 8,
         "h": 8
       },
       "targets": [
@@ -218,103 +356,7 @@
           "unit": "reqps",
           "custom": {
             "lineWidth": 2,
-            "fillOpacity": 12,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "p95 latency",
-      "description": "Time measured inside the pod. It does not include the hop through API Gateway.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 16,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
-          "legendFormat": "p95",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 12,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Busiest routes",
-      "description": "The label is the route pattern, not the URL: /v2/items/:id, never /v2/items/7.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 16,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "expr": "topk(5, sum by (route) (rate(http_requests_total[5m])))",
-          "legendFormat": "{{route}}",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 10,
             "showPoints": "never"
           }
         },
@@ -335,15 +377,15 @@
     {
       "type": "timeseries",
       "title": "Cache hit ratio",
-      "description": "Empty while no listing has been requested: a ratio with no traffic underneath is 0/0.",
+      "description": "Covers both what is cached: the item listings and the records fetched from the other cloud.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 0,
+        "x": 8,
         "y": 24,
-        "w": 12,
+        "w": 8,
         "h": 8
       },
       "targets": [
@@ -362,7 +404,7 @@
           "unit": "percentunit",
           "custom": {
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 10,
             "showPoints": "never"
           }
         },
@@ -383,15 +425,15 @@
     {
       "type": "timeseries",
       "title": "Process memory",
-      "description": "Sampled from whichever replica answered the scrape, so it steps between pods.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 12,
+        "x": 16,
         "y": 24,
-        "w": 12,
+        "w": 8,
         "h": 8
       },
       "targets": [
@@ -410,7 +452,7 @@
           "unit": "bytes",
           "custom": {
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 10,
             "showPoints": "never"
           }
         },
