@@ -1,0 +1,45 @@
+# Horizontal autoscaling for the API.
+#
+#   kubectl apply -f deploy/hpa.yaml
+#
+# Needs metrics-server, which EKS Auto Mode does not ship:
+#   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+#
+# minReplicas stays at 2 so the floor never drops below the two replicas the
+# deployment is meant to keep: an autoscaler that can scale to one would
+# quietly undo the redundancy it was added to protect.
+#
+# The target is CPU because this API is CPU-bound on JSON serialisation long
+# before it is memory-bound, and because memory on Node barely moves under
+# load — the heap grows and the garbage collector reclaims it, so a memory
+# target produces an autoscaler that never fires.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inventory-api
+  namespace: inventory
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: inventory-api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Of the 100m request, not of the node. Half leaves room to absorb a
+          # burst while the new pods are still starting.
+          averageUtilization: 50
+  behavior:
+    scaleUp:
+      # Default is 15s of stabilisation; none at all reacts to a demo burst
+      # fast enough to be visible while someone is watching.
+      stabilizationWindowSeconds: 0
+    scaleDown:
+      # Slow on the way down on purpose: flapping between replica counts is
+      # worse than paying for a pod that is idle for five minutes.
+      stabilizationWindowSeconds: 300
