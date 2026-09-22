@@ -46,3 +46,6 @@ CLAUDE.local.md
 
 # Course material: rubrics and briefs live next to the repo, not in it
 *.pdf
+
+# Grafana Cloud push credentials, mounted into Prometheus
+observability/grafana-cloud-token
