@@ -1,4 +1,4 @@
-import { Controller, Get, NotFoundException } from '@nestjs/common';
+import { Controller, Delete, Get, NotFoundException } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InteropRecord } from './interop.contract';
 import { InteropService } from './interop.service';
@@ -31,5 +31,18 @@ export class InteropV2Controller {
       });
     }
     return record;
+  }
+
+  @Delete('cache')
+  @ApiOperation({
+    summary: 'Drop the cached records from the other cloud',
+    description:
+      'The TTL bounds how stale a partner record can be; this forces the next ' +
+      'read to go back across the clouds straight away, which is what makes a ' +
+      'change made on the other side visible immediately.',
+  })
+  @ApiResponse({ status: 200, description: '`invalidated` is false when no cache is configured' })
+  async invalidate(): Promise<{ invalidated: boolean }> {
+    return this.service.invalidatePartnerCache();
   }
 }
