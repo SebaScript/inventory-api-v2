@@ -49,3 +49,5 @@ CLAUDE.local.md
 
 # Grafana Cloud push credentials, mounted into Prometheus
 observability/grafana-cloud-token
+# The filled-in scrape config: the template is prometheus.example.yml
+observability/prometheus.yml

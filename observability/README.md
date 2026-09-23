@@ -7,8 +7,15 @@ team runs its own, pointed at the same orchestrator on a different path.
 
 ```bash
 cd observability
+cp prometheus.example.yml prometheus.yml   # fill in the placeholders
 docker compose up -d
 ```
+
+`prometheus.yml` is git-ignored: it holds the orchestrator's address and this
+API's Grafana Cloud instance. The Grafana Cloud token goes in a separate file,
+`grafana-cloud-token`, also ignored — write it as plain UTF-8. PowerShell's
+`echo ... >` writes UTF-16, which turns the password into bytes Grafana Cloud
+rejects with a 401 that never says why.
 
 | | |
 |---|---|
