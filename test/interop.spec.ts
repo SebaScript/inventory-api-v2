@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CacheRead, CacheService } from '../src/cache/cache.service';
+import { ObjectStorageService, StoredObject } from '../src/storage/object-storage.service';
 import { createApp, reset } from './app.factory';
 
 describe('Interop with the other cloud', () => {
@@ -194,5 +195,130 @@ describe('Caching what the partner returns', () => {
     await api.get('/v2/items/1').expect(200);
 
     expect(calls).toBe(2);
+  });
+});
+
+/** Keeps what would have gone to S3, so a test can read it back. */
+class FakeStorage {
+  readonly objects = new Map<string, { body: string; contentType: string }>();
+
+  configured = true;
+
+  put(key: string, body: string, contentType: string): Promise<StoredObject> {
+    this.objects.set(key, { body, contentType });
+    return Promise.resolve({
+      key,
+      bytes: Buffer.byteLength(body),
+      url: `https://bucket.test/${key}?signed`,
+      expiresInSeconds: 900,
+    });
+  }
+}
+
+describe('A step of the cross-cloud flow', () => {
+  const storage = new FakeStorage();
+  let app: INestApplication;
+  let dataSource: DataSource;
+  let api: Awaited<ReturnType<typeof createApp>>['api'];
+
+  beforeAll(async () => {
+    ({ app, dataSource, api } = await createApp(
+      undefined,
+      storage as unknown as ObjectStorageService,
+    ));
+  });
+  afterAll(() => app.close());
+
+  beforeEach(async () => {
+    storage.objects.clear();
+    storage.configured = true;
+    await reset(dataSource);
+    await api.post('/groups').send({ name: 'Electronics' }).expect(201);
+    await api
+      .post('/items')
+      .send({ groupId: 1, name: 'USB Hub', sku: 'H1', quantity: 3 })
+      .expect(201);
+  });
+
+  const upstream = {
+    correlationId: 'flow-42',
+    requestedBy: 'orchestrator',
+    entities: [{ source: 'orders-api', kind: 'order', id: 'o-1' }],
+    attachments: [{ source: 'orders-api', key: 'flows/flow-42/orders.json' }],
+  };
+
+  it('adds one item and keeps everything the other steps put there', async () => {
+    const { body } = await api.post('/v2/interop/messages').send(upstream).expect(201);
+
+    expect(body.requestedBy).toBe('orchestrator');
+    expect(body.entities).toHaveLength(2);
+    expect(body.entities[0]).toEqual(upstream.entities[0]);
+    expect(body.entities[1]).toMatchObject({
+      source: 'inventory-api',
+      kind: 'item',
+      label: 'USB Hub',
+    });
+    expect(body.attachments[0]).toEqual(upstream.attachments[0]);
+  });
+
+  it('stores the accumulated JSON and hands back a link to it', async () => {
+    const { body } = await api.post('/v2/interop/messages').send(upstream).expect(201);
+
+    const mine = body.attachments[1];
+    expect(mine).toMatchObject({ source: 'inventory-api', expiresInSeconds: 900 });
+    expect(mine.key).toMatch(/^flows\/flow-42\/.+-inventory-api\.json$/);
+
+    const saved = storage.objects.get(mine.key)!;
+    expect(saved.contentType).toBe('application/json');
+    // What is stored is the message after this step, entity included.
+    expect(JSON.parse(saved.body).entities).toHaveLength(2);
+  });
+
+  it('takes the correlation id from the header when the body has none', async () => {
+    const { body } = await api
+      .post('/v2/interop/messages')
+      .set('X-Correlation-Id', 'from-header')
+      .send({ entities: [] })
+      .expect(201);
+
+    expect(body.correlationId).toBe('from-header');
+    expect(body.attachments[0].key).toMatch(/^flows\/from-header\//);
+  });
+
+  it('never lets a correlation id climb out of its folder', async () => {
+    const { body } = await api
+      .post('/v2/interop/messages')
+      .send({ correlationId: '../../etc/passwd' })
+      .expect(201);
+
+    const key: string = body.attachments[0].key;
+    expect(key.startsWith('flows/')).toBe(true);
+    expect(key.split('/')).toHaveLength(3);
+    expect(key).not.toContain('..');
+  });
+
+  it('still adds the entity when there is no bucket, just without a file', async () => {
+    storage.configured = false;
+
+    const { body } = await api.post('/v2/interop/messages').send(upstream).expect(201);
+
+    expect(body.entities).toHaveLength(2);
+    expect(body.attachments).toEqual(upstream.attachments);
+    expect(storage.objects.size).toBe(0);
+  });
+
+  it('rejects anything that is not a JSON object', async () => {
+    const { body } = await api.post('/v2/interop/messages').send([1, 2]).expect(400);
+    expect(body.code).toBe('INVALID_MESSAGE');
+  });
+
+  it('says so when there is no active item to add', async () => {
+    await api.delete('/items/1').expect(204);
+    const { body } = await api.post('/v2/interop/messages').send(upstream).expect(404);
+    expect(body.code).toBe('NO_RECORDS');
+  });
+
+  it('also answers under /api/v2', async () => {
+    await api.post('/api/v2/interop/messages').send(upstream).expect(201);
   });
 });
