@@ -49,8 +49,12 @@ spec:
         value: http/protobuf
       - name: OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT
         value: http://cloudwatch-agent.amazon-cloudwatch:4316/v1/metrics
+      # Traces go to the collector in deploy/otel-collector.yaml, which forwards
+      # each one to both the CloudWatch agent and Grafana Cloud. The metrics
+      # endpoint above still points straight at the agent: Application Signals
+      # metrics have one destination and need no fan-out.
       - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-        value: http://cloudwatch-agent.amazon-cloudwatch:4316/v1/traces
+        value: http://otel-collector.inventory:4318/v1/traces
       - name: OTEL_TRACES_SAMPLER
         value: xray
       - name: OTEL_TRACES_SAMPLER_ARG
