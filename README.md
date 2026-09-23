@@ -353,6 +353,22 @@ else being called. Every failure mode is covered by a test, and with
 exactly as it always has. The unversioned `GET /items/:id` is untouched: this is
 the first real divergence the `/v2` surface was built for.
 
+**`POST /v2/interop/messages` is this API's step in the cross-cloud flow.** The
+orchestrator posts the message it is carrying; this API appends one of its items
+to `entities`, writes the accumulated JSON to object storage under
+`flows/<correlation id>/`, and appends a presigned link to `attachments`.
+Everything else in the message comes back untouched, so no step can erase
+another's. The correlation id becomes part of an object key, so it is reduced
+to characters that cannot leave that prefix. Without a bucket the item is
+still added and no file is written.
+
+**Logs and traces point at each other.** Every request log line carries the
+OpenTelemetry `traceId`, and every request span carries the correlation id as
+`app.correlation_id`. From a log line you reach its trace; from the id another
+cloud logged, you find the trace here. The SDK itself is injected by the
+cluster, not bundled: `@opentelemetry/api` is the only dependency, and with no
+SDK loaded both stamps are no-ops.
+
 **The partner record is cached, and only when it is good.** A successful lookup is stored for `PARTNER_CACHE_TTL_SECONDS` (30 by default) in its own
 cache namespace, so a burst of reads is one cross-cloud call rather than one
 each. A failure is never stored: caching an outage would make it outlive
