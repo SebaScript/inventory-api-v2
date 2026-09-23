@@ -2,13 +2,10 @@
   "uid": "inventory-api-aws",
   "title": "inventory-api — AWS",
   "description": "Scraped through the orchestrator in the other cloud. Counters come from two replicas behind a load balancer, so rates are indicative, not exact.",
-  "tags": [
-    "inventory",
-    "multicloud"
-  ],
+  "tags": ["inventory", "multicloud"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -131,9 +128,7 @@
         "textMode": "value",
         "colorMode": "background",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         }
@@ -473,6 +468,41 @@
           "mode": "multi",
           "sort": "desc"
         }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Recent traces",
+      "description": "From Tempo, sent by the OpenTelemetry collector in the cluster. Click a trace id to open the full waterfall. The same traces also land in AWS X-Ray.",
+      "datasource": {
+        "type": "tempo",
+        "uid": "grafanacloud-traces"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "grafanacloud-traces"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=\"inventory-api\"}",
+          "limit": 20,
+          "tableType": "traces"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
       }
     }
   ]
