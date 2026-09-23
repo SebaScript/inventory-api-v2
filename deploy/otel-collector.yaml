@@ -1,0 +1,111 @@
+# An OpenTelemetry Collector that sends every trace to two places at once:
+#
+#   the API (auto-instrumented)  ──OTLP──►  this collector  ─┬─►  CloudWatch agent  ──►  X-Ray / Application Signals
+#                                                             └─►  Grafana Cloud     ──►  Tempo
+#
+#   kubectl apply -f deploy/otel-collector.yaml
+#
+# The SDK in the pods can export to one endpoint only, so fanning out has to
+# happen somewhere else, and a collector is what the OpenTelemetry project
+# builds for exactly that. Neither destination is given up: X-Ray stays the
+# native tracing of this cloud, Tempo puts traces next to the metrics already
+# in this API's own Grafana Cloud stack.
+#
+# Needs a secret with the Grafana Cloud credentials, created by hand and never
+# committed. The value is the whole Authorization header:
+#   kubectl create secret generic grafana-cloud-otlp -n inventory \
+#     --from-literal=authorization="Basic $(printf '%s' "INSTANCE_ID:TOKEN" | base64 -w0)"
+# INSTANCE_ID is the stack id on the OpenTelemetry page, not the Prometheus one.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector
+  namespace: inventory
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      # Refuses data before the pod is OOM-killed, instead of after.
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+      batch: {}
+
+    exporters:
+      otlphttp/cloudwatch:
+        traces_endpoint: http://cloudwatch-agent.amazon-cloudwatch:4316/v1/traces
+      otlphttp/grafana:
+        endpoint: https://otlp-gateway-prod-us-east-3.grafana.net/otlp
+        headers:
+          Authorization: ${env:GRAFANA_CLOUD_AUTHORIZATION}
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          # A failing destination retries on its own queue; it does not stop
+          # the other one from receiving the trace.
+          exporters: [otlphttp/cloudwatch, otlphttp/grafana]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: inventory
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: collector
+          # Pinned: the collector's config keys change between releases, and
+          # an unpinned image is how a restart turns into a crash loop.
+          image: otel/opentelemetry-collector-contrib:0.161.0
+          args: ['--config=/conf/config.yaml']
+          ports:
+            - containerPort: 4318
+          env:
+            - name: GRAFANA_CLOUD_AUTHORIZATION
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud-otlp
+                  key: authorization
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: inventory
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
