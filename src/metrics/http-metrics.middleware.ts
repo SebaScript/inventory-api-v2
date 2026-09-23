@@ -1,6 +1,6 @@
 import { Injectable, Logger, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
-import { correlationIdOf } from '../common/correlation';
+import { correlationIdOf, currentTraceId } from '../common/correlation';
 import { httpDuration, httpRequests } from './registry';
 
 /** Probes and scrapes would drown out real traffic on every graph. */
@@ -25,6 +25,9 @@ export class HttpMetricsMiddleware implements NestMiddleware {
     if (IGNORED.test(request.originalUrl.split('?')[0])) return next();
 
     const startedAt = process.hrtime.bigint();
+    // Read now, not on `finish`: by the time the response is flushed the
+    // request's span is no longer the active one.
+    const traceId = currentTraceId();
 
     response.on('finish', () => {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
@@ -43,6 +46,7 @@ export class HttpMetricsMiddleware implements NestMiddleware {
         status: response.statusCode,
         durationMs: Math.round(seconds * 1000),
         correlationId: correlationIdOf(request),
+        traceId,
       });
     });
 
