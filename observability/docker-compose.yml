@@ -19,10 +19,9 @@ services:
       - '9090:9090'
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      # Uncomment together with the remote_write block in prometheus.yml, and
-      # create the file first: Docker turns a missing bind source into a
-      # directory, and Prometheus then fails to start with a confusing error.
-      # - ./grafana-cloud-token:/etc/prometheus/grafana-cloud-token:ro
+      # Create this file before starting: Docker turns a missing bind source
+      # into a directory, and Prometheus then fails with a confusing error.
+      - ./grafana-cloud-token:/etc/prometheus/grafana-cloud-token:ro
     restart: unless-stopped
 
   grafana:
