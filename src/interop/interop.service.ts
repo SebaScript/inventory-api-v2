@@ -1,11 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { CacheService, PARTNER_NAMESPACE } from '../cache/cache.service';
 import { CORRELATION_HEADER } from '../common/correlation';
 import { Item, ItemStatus } from '../entities/item.entity';
 import { partnerLookups } from '../metrics/registry';
-import { InteropRecord, PartnerLookup, SERVICE_NAME } from './interop.contract';
+import { ObjectStorageService } from '../storage/object-storage.service';
+import {
+  FlowAttachment,
+  FlowMessage,
+  InteropRecord,
+  PartnerLookup,
+  SERVICE_NAME,
+} from './interop.contract';
 
 /** Short on purpose: this runs inside a GET, so it must never hold the response. */
 const DEFAULT_TIMEOUT_MS = 1_500;
@@ -26,6 +34,7 @@ export class InteropService {
   constructor(
     @InjectRepository(Item) private readonly items: Repository<Item>,
     private readonly cache: CacheService,
+    private readonly storage: ObjectStorageService,
   ) {}
 
   get partnerConfigured(): boolean {
@@ -126,6 +135,43 @@ export class InteropService {
   }
 
   /**
+   * One step of the cross-cloud flow: adds an entity from this API to the
+   * message and keeps the accumulated JSON in object storage.
+   *
+   * Whatever the message already carries is kept untouched: this API only
+   * appends to `entities` and `attachments`, so no step can erase another's.
+   * Without a bucket the entity is still added and no attachment is written,
+   * the same way every other cloud feature degrades here.
+   */
+  async appendToMessage(
+    message: Record<string, unknown>,
+    correlationId?: string,
+  ): Promise<FlowMessage | null> {
+    const record = await this.randomLocalRecord();
+    if (!record) return null;
+
+    const entities = Array.isArray(message.entities) ? message.entities : [];
+    const attachments = Array.isArray(message.attachments)
+      ? (message.attachments as FlowAttachment[])
+      : [];
+    const id = typeof message.correlationId === 'string' ? message.correlationId : correlationId;
+
+    const accumulated = { ...message, correlationId: id, entities: [...entities, record] };
+    if (!this.storage.configured) return { ...accumulated, attachments };
+
+    const key = `flows/${safeSegment(id ?? randomUUID())}/${new Date().toISOString()}-${SERVICE_NAME}.json`;
+    const stored = await this.storage.put(key, JSON.stringify(accumulated), 'application/json');
+
+    return {
+      ...accumulated,
+      attachments: [
+        ...attachments,
+        { source: SERVICE_NAME, key, url: stored.url, expiresInSeconds: stored.expiresInSeconds },
+      ],
+    };
+  }
+
+  /**
    * Drops the cached partner records so the next read goes back to the other
    * cloud. One INCR, whatever the number of entries.
    *
@@ -143,4 +189,17 @@ export class InteropService {
     this.logger.warn({ message: 'Partner lookup failed', reason, correlationId });
     return { status: 'unavailable', record: null };
   }
+}
+
+/**
+ * The correlation id arrives from another cloud and becomes part of an object
+ * key, so it is reduced to characters that cannot climb out of the prefix or
+ * split it into extra segments.
+ */
+function safeSegment(value: string): string {
+  return value
+    .replace(/[^A-Za-z0-9._-]/g, '_')
+    .replace(/[.]{2,}/g, '_')
+    .replace(/^[.]/, '_')
+    .slice(0, 128);
 }

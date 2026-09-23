@@ -51,3 +51,39 @@ export class PartnerLookup {
   @ApiProperty({ type: InteropRecord, nullable: true })
   record: InteropRecord | null;
 }
+
+/** A file this API wrote while the message passed through it. */
+export class FlowAttachment {
+  @ApiProperty({ example: SERVICE_NAME })
+  source: string;
+
+  @ApiProperty({ example: 'flows/3f2c9a1e/2026-09-22T21:00:00.000Z-inventory-api.json' })
+  key: string;
+
+  @ApiProperty({ description: 'Presigned link; the bucket itself stays private' })
+  url: string;
+
+  @ApiProperty({ example: 900 })
+  expiresInSeconds: number;
+}
+
+/**
+ * The message the orchestrator carries from one API to the next. Only the
+ * fields this API writes are described: anything else in it belongs to the
+ * other steps and is passed through as it came.
+ */
+export class FlowMessage {
+  [key: string]: unknown;
+
+  @ApiProperty({ required: false, example: '3f2c9a1e' })
+  correlationId?: string;
+
+  @ApiProperty({
+    type: [InteropRecord],
+    description: 'One entity added by each API the message went through',
+  })
+  entities: unknown[];
+
+  @ApiProperty({ type: [FlowAttachment] })
+  attachments: FlowAttachment[];
+}

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Item } from '../entities/item.entity';
+import { StorageModule } from '../storage/storage.module';
 import { InteropV2Controller } from './interop.controller';
 import { InteropService } from './interop.service';
 
@@ -8,7 +9,7 @@ import { InteropService } from './interop.service';
 // never has to export anything and there is no cycle: ItemsModule imports this
 // one, not the other way round.
 @Module({
-  imports: [TypeOrmModule.forFeature([Item])],
+  imports: [TypeOrmModule.forFeature([Item]), StorageModule],
   controllers: [InteropV2Controller],
   providers: [InteropService],
   exports: [InteropService],
