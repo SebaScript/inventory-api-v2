@@ -24,6 +24,14 @@ spec:
         # Instrumentation resource in the namespace (deploy/instrumentation.yaml);
         # without one the annotation is silently ignored.
         instrumentation.opentelemetry.io/inject-nodejs: 'true'
+        # Auto Mode consolidates underutilised nodes every few minutes, and each
+        # move left the load balancer with no registered target for about a
+        # minute: the budget in pdb.yaml evicts one pod at a time, but a pod is
+        # Ready well before the NLB has health-checked its new IP. The saving
+        # was five cents; the price was a minute of timeouts. Readiness gates
+        # would be the precise fix, and Auto Mode's controller does not inject
+        # them, so voluntary disruption is simply switched off for these pods.
+        karpenter.sh/do-not-disrupt: 'true'
     spec:
       serviceAccountName: inventory-api
       # Long enough for the drain in HealthController plus the server close.
