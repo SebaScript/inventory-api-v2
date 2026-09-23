@@ -2,10 +2,13 @@
   "uid": "inventory-api-aws",
   "title": "inventory-api — AWS",
   "description": "Scraped through the orchestrator in the other cloud. Counters come from two replicas behind a load balancer, so rates are indicative, not exact.",
-  "tags": ["inventory", "multicloud"],
+  "tags": [
+    "inventory",
+    "multicloud"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -128,7 +131,9 @@
         "textMode": "value",
         "colorMode": "background",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         }
@@ -504,6 +509,58 @@
         "defaults": {},
         "overrides": []
       }
+    },
+    {
+      "type": "logs",
+      "title": "Logs for one correlation id",
+      "description": "CloudWatch Logs, read from Grafana through an IAM role Grafana Cloud assumes. Type a correlation id at the top: every line the API wrote for that message, across both pods, in order.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "afz2cnj4ntt6of"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "afz2cnj4ntt6of"
+          },
+          "queryMode": "Logs",
+          "region": "us-east-1",
+          "id": "",
+          "logGroupNames": [
+            "/aws/containerinsights/inventory/application"
+          ],
+          "expression": "fields @timestamp, log | filter log like /$correlationId/ | sort @timestamp asc | limit 100"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true
+      }
     }
-  ]
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "textbox",
+        "name": "correlationId",
+        "label": "Correlation id",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0
+      }
+    ]
+  }
 }
