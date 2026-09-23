@@ -16,7 +16,7 @@ export class CreateMovementDto {
 
   @ApiProperty({
     example: 25,
-    description: 'Always positive — the direction comes from `type`, never from a sign',
+    description: 'Always positive: the direction comes from `type`, never from a sign',
   })
   @IsInt()
   @Min(1, { message: 'quantity must be greater than 0' })

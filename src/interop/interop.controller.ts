@@ -16,7 +16,6 @@ import { CORRELATION_HEADER } from '../common/correlation';
 import { FlowMessage, InteropRecord } from './interop.contract';
 import { InteropService } from './interop.service';
 
-/** What the other cloud calls. Own resource, so it never competes with `@Get(':id')`. */
 @ApiTags('Interop v2')
 @Controller({ path: 'interop', version: '2' })
 export class InteropV2Controller {

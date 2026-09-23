@@ -17,7 +17,7 @@ export abstract class MovementsControllerBase {
       'item row locked so concurrent requests cannot oversell.',
   })
   @ApiResponse({ status: 201, type: Movement })
-  @ApiResponse({ status: 409, description: 'Insufficient stock — nothing was written' })
+  @ApiResponse({ status: 409, description: 'Insufficient stock, nothing was written' })
   create(@Body() dto: CreateMovementDto): Promise<Movement> {
     return this.service.create(dto);
   }

@@ -1,4 +1,4 @@
-# Observability — Prometheus and Grafana for the inventory API
+# Observability with Prometheus and Grafana for the inventory API
 
 Each API has its own, independent observability stack. This is the inventory
 one.
@@ -73,7 +73,7 @@ writing the same metrics would double every rate on the dashboard.
 | ----------------------------- | ---------------------------------------------------------------------- |
 | **Cross-cloud calls**         | `sum by (outcome) (rate(partner_lookups_total[5m]))`                   |
 | Orchestrator path             | `up{job="inventory-api"}`                                              |
-| **Pods serving**              | `count(up{job="inventory-api-pods"} == 1)` — watch the autoscaler here |
+| **Pods serving**              | `count(up{job="inventory-api-pods"} == 1)` (watch the autoscaler here) |
 | Request rate by endpoint      | `sum by (route) (rate(http_requests_total[5m]))`                       |
 | Error rate by endpoint        | 4xx and 5xx over the total, by route                                   |
 | p50 / p95 latency by endpoint | `histogram_quantile` over `http_request_duration_seconds_bucket`       |

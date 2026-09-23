@@ -2,10 +2,6 @@
 
 RESTful inventory API with NestJS + TypeScript + PostgreSQL.
 
-Every resource is served twice: at its bare path and under `/v2`. The two
-versions are the same code today — `/v2` is the surface new behaviour will be
-added to, without disturbing what already calls the original paths.
-
 ```bash
 git clone https://github.com/SebaScript/inventory-api-v2.git
 cd inventory-api-v2
@@ -76,75 +72,6 @@ flowchart LR
   dash -. "reads logs via IAM role" .-> cw
 ```
 
-### Who operates what
-
-|                | Cloud        | Owns                                                                                                                                        |
-| -------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| **SebaScript** | AWS          | `inventory-api` on EKS, RDS, **the cache** (ElastiCache), **the object storage** (S3), API Gateway, CloudWatch, its own Grafana Cloud stack |
-| **Partner**    | Google Cloud | `orders-api`, **the orchestrator**, **the queue** (Pub/Sub + dead-letter topic), its own Grafana Cloud stack                                |
-
-The group is two people rather than three, so the transversal components split
-two-one instead of one-one-one. Each complete API still lives in a different
-provider, and no component is duplicated across clouds.
-
-### Why these services
-
-| Need                            | Service                                               | Why this one                                                                                                                                     |
-| ------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| API key that cannot be bypassed | API Gateway **REST**                                  | API keys and usage plans exist only in REST APIs, not HTTP APIs. The usage plan also rate-limits every key to 10 requests a second, bursts of 20 |
-| Load balancing                  | Internal **NLB**, reached through a **VPC Link**      | Spreads requests over the replicas. Internal, so the only way in is the gateway: the key cannot be skipped by calling the balancer               |
-| Kubernetes                      | EKS **Auto Mode**                                     | Ships the load balancer controller, Pod Identity and the node monitoring agent. Fargate runs no DaemonSets, which rules out all three            |
-| Secrets                         | Kubernetes **Secret** + **EKS Pod Identity**          | The database URL and the orchestrator key live in a Secret; S3 access comes from a pod role, so no AWS key exists anywhere                       |
-| Container registry              | **ECR**                                               | Private, in the same region as the cluster, pulled with the node role                                                                            |
-| Database                        | RDS PostgreSQL                                        | The engine the app already speaks. Forces TLS from version 15                                                                                    |
-| Cache                           | ElastiCache Valkey                                    | Shared by every replica, so a record fetched from the other cloud is reused across pods                                                          |
-| Object storage                  | S3                                                    | Private bucket, reached through presigned URLs, so no object is ever public                                                                      |
-| Monitoring in our own cloud     | CloudWatch                                            | Logs, Container Insights, X-Ray and Application Signals, all native. The cache metric is written in EMF: no SDK, no API calls                    |
-| Tracing                         | OpenTelemetry, auto-injected, through a **Collector** | The SDK is injected by the cluster, not bundled. The collector sends each trace to both X-Ray and Grafana Cloud                                  |
-| Monitoring as a service         | **Grafana Cloud**, this API's own stack               | Metrics, traces and a dashboard in one place; logs are read from CloudWatch through an IAM role, with no access key                              |
-
-## Versions
-
-Versioning is NestJS URI versioning. The original controllers are declared
-version **neutral**, so their paths did not change; only a controller that
-declares a version gets a prefix.
-
-|          | Base path                                  | Declared as     |
-| -------- | ------------------------------------------ | --------------- |
-| Original | `/groups`, `/items`, `/movements`          | version neutral |
-| v2       | `/v2/groups`, `/v2/items`, `/v2/movements` | `version: '2'`  |
-| v2 alias | `/api/v2/...`                              | url rewrite     |
-
-Both versions read and write the same database through the same services, so a
-record created through one is immediately visible from the other.
-
-Everything under `/v2` also answers under **`/api/v2`**. It is a url rewrite
-that runs before the router (`src/common/api-alias.ts`), not a second set of
-routes: both spellings reach the same handler and report the same route
-pattern, so no metric is split in two.
-
-Each resource keeps its routes in a single abstract base controller with no
-path and no version of its own. Both versions mount that base, so `/v2` starts
-as an exact mirror and a future change there is declared by overriding one
-method — everything else keeps coming from the base:
-
-```ts
-@ApiTags('Items v2')
-@Controller({ path: 'items', version: '2' })
-export class ItemsV2Controller extends ItemsControllerBase {
-  constructor(service: ItemsService) {
-    super(service);
-  }
-}
-```
-
-That constructor is not boilerplate that can be deleted. Without it TypeScript
-emits no `design:paramtypes` for the class, and Nest injects `undefined`
-instead of failing to start: the application boots green and the routes answer
-`500`.
-
-`/health` stays version neutral: it reports the process, not the API surface.
-
 ## API
 
 The paths below are listed unversioned. Each one also exists under `/v2` with
@@ -160,7 +87,7 @@ A group is a category. It is the dimension items are classified by.
 | `GET`    | `/groups`     | Lists categories, paginated. `?search` matches the name           |
 | `GET`    | `/groups/:id` | Returns one category                                              |
 | `PATCH`  | `/groups/:id` | Updates only the fields that were sent; the rest stay as they are |
-| `DELETE` | `/groups/:id` | Deletes it, but only if it is empty — otherwise `409`             |
+| `DELETE` | `/groups/:id` | Deletes it, but only if it is empty, otherwise `409`             |
 
 ### Items: `/items`
 
@@ -176,15 +103,10 @@ An item is a product. It holds the **current state**: how much stock there is ri
 | `PATCH`     | `/items/:id`        | Updates only the fields that were sent. The stock is never one of them. Also brings a product back with `{"status":"ACTIVE"}`              |
 | `DELETE`    | `/items/:id`        | **Discontinues** it: it leaves the listings and accepts no more movements, but neither it nor its history is erased                        |
 
-`QUERY` is a real HTTP method, safe and idempotent like `GET` but carrying a
-request body. OpenAPI 3.0 has a closed list of methods that does not include
-it, so the endpoint cannot appear in `/docs` as an operation — it is named in
-the document description instead, and `POST /items/search` is an identical
-alias for clients that cannot send the verb. Both exist under `/v2` too.
 
 ### Movements: `/movements`
 
-A movement is an entry or exit of stock. It is the **immutable event log** that explains every unit — hence no `PUT`, `PATCH` or `DELETE`. A mistake is corrected with an opposite movement.
+A movement is an entry or exit of stock. It is the **immutable event log** that explains every unit, hence no `PUT`, `PATCH` or `DELETE`. A mistake is corrected with an opposite movement.
 
 | Method | Path             | What it does                                                                                                                                                            |
 | ------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -220,7 +142,7 @@ Every failure has the same shape. Branch on `code`, not on `message`.
 | `404`  | The resource does not exist                                                    |
 | `409`  | Duplicate name/SKU, non-empty group, discontinued item, **insufficient stock** |
 | `422`  | A database rule was broken                                                     |
-| `500`  | Unexpected — generic message only, details go to the log                       |
+| `500`  | Unexpected: generic message only, details go to the log                       |
 | `503`  | Health check: PostgreSQL unreachable                                           |
 
 In production an unexpected error returns only `"Internal server error"`. A test asserts that a thrown error containing a password never appears in the response.
@@ -278,7 +200,7 @@ through `.env`: `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `API_PORT`.
 
 ## Tests
 
-The suite runs end to end against a **real PostgreSQL** — it asserts on
+The suite runs end to end against a **real PostgreSQL**: it asserts on
 transactions, row locks and `CHECK` constraints, none of which can be faked.
 Docker supplies that database:
 
@@ -334,10 +256,6 @@ metrics-server, which EKS Auto Mode does not ship. `deploy/load-test.yaml` is a 
 the cluster to watch it happen: measured, two replicas become six in under a
 minute, and go back to two five minutes after the load stops.
 
-In production the application logs one JSON object per line and publishes a
-cache hit-ratio metric in CloudWatch Embedded Metric Format — written to stdout,
-so it needs no metrics SDK, no API call in the request path and no credentials.
-
 ## Behind a gateway or an orchestrator
 
 The API is a well-behaved downstream service, and nothing below changes how it
@@ -365,7 +283,7 @@ orchestrator.
 
 That lookup is never allowed to matter. It reports `ok`, `unavailable` or
 `disabled` rather than throwing, runs behind a short timeout, and happens only
-after the local read has succeeded — an unknown id still 404s without anyone
+after the local read has succeeded: an unknown id still 404s without anyone
 else being called. Every failure mode is covered by a test, and with
 `ORCHESTRATOR_URL` unset the whole thing reports `disabled` and the API behaves
 exactly as it always has. The unversioned `GET /items/:id` is untouched: this is
@@ -387,16 +305,12 @@ cloud logged, you find the trace here. The SDK itself is injected by the
 cluster, not bundled: `@opentelemetry/api` is the only dependency, and with no
 SDK loaded both stamps are no-ops.
 
-**The partner record is cached, and only when it is good.** A successful lookup is stored for `PARTNER_CACHE_TTL_SECONDS` (30 by default) in its own
+**Partner record is cached, and only when it is good.** A successful lookup is stored for `PARTNER_CACHE_TTL_SECONDS` (30 by default) in its own
 cache namespace, so a burst of reads is one cross-cloud call rather than one
 each. A failure is never stored: caching an outage would make it outlive
 itself. Expiry bounds how stale a record can get; `DELETE /v2/interop/cache`
 is the way to force a refresh straight away, which is what makes a change
 made on the other side visible immediately instead of up to a TTL later.
-
-Not yet done, and worth knowing before putting a retrying orchestrator in
-front: writes are **not idempotent**. A retried `POST /movements` moves the
-stock twice.
 
 ## Scripts
 

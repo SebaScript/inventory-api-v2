@@ -1,6 +1,6 @@
 {
   "uid": "inventory-api",
-  "title": "Inventory API — multicloud",
+  "title": "Inventory API (multicloud)",
   "description": "Scraped through the orchestrator in the other cloud. Counters come from two replicas behind a load balancer, so rates are indicative, not exact.",
   "tags": ["inventory", "multicloud"],
   "timezone": "browser",

@@ -1,6 +1,6 @@
 {
   "uid": "inventory-api-aws",
-  "title": "inventory-api — AWS",
+  "title": "inventory-api (AWS)",
   "description": "Metrics scraped from each API pod by a Prometheus agent running in the EKS cluster, and sent to this stack. Traces from Tempo, logs from CloudWatch.",
   "tags": ["inventory", "multicloud"],
   "timezone": "browser",

@@ -43,7 +43,7 @@ export abstract class ItemsControllerBase {
   @Post('search')
   @HttpCode(200)
   @ApiOperation({
-    summary: 'Advanced search — alias of QUERY /items/search',
+    summary: 'Advanced search: alias of QUERY /items/search',
     description:
       'The canonical verb is QUERY. This POST alias exists only because ' +
       'Swagger UI cannot send the QUERY method. Same body, same response.',

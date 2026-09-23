@@ -2,7 +2,6 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export const SERVICE_NAME = 'inventory-api';
 
-/** The shape both clouds agree on. Domain-agnostic: neither API knows the other's model. */
 export class InteropRecord {
   @ApiProperty({ example: SERVICE_NAME, description: 'Which API this came from' })
   source: string;
@@ -26,7 +25,6 @@ export class InteropRecord {
   retrievedAt: string;
 }
 
-/** Reports a status instead of throwing: the other cloud must never break a local read. */
 export class PartnerLookup {
   @ApiProperty({
     enum: ['ok', 'unavailable', 'disabled'],
@@ -54,7 +52,6 @@ export class FlowAttachment {
   expiresInSeconds: number;
 }
 
-/** The orchestrator's message. Unknown fields belong to other steps and pass through. */
 export class FlowMessage {
   [key: string]: unknown;
 
