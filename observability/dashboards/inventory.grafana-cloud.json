@@ -1,14 +1,11 @@
 {
   "uid": "inventory-api-aws",
   "title": "inventory-api — AWS",
-  "description": "Scraped through the orchestrator in the other cloud. Counters come from two replicas behind a load balancer, so rates are indicative, not exact.",
-  "tags": [
-    "inventory",
-    "multicloud"
-  ],
+  "description": "Metrics scraped from each API pod by a Prometheus agent running in the EKS cluster, and sent to this stack. Traces from Tempo, logs from CloudWatch.",
+  "tags": ["inventory", "multicloud"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -66,16 +63,16 @@
     },
     {
       "type": "stat",
-      "title": "Scrape target",
+      "title": "Orchestrator path",
       "datasource": {
         "type": "prometheus",
         "uid": "grafanacloud-prom"
       },
-      "description": "Whether Prometheus can reach the orchestrator. DOWN here means every other panel is stale.",
+      "description": "Whether the orchestrator in the other cloud is serving these metrics. A connectivity check only: the numbers on this dashboard are read from each pod directly.",
       "gridPos": {
         "x": 16,
         "y": 0,
-        "w": 8,
+        "w": 4,
         "h": 8
       },
       "targets": [
@@ -131,9 +128,7 @@
         "textMode": "value",
         "colorMode": "background",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         }
@@ -395,7 +390,7 @@
       },
       "targets": [
         {
-          "expr": "rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))",
+          "expr": "sum(rate(cache_hits_total[5m])) / (sum(rate(cache_hits_total[5m])) + sum(rate(cache_misses_total[5m])))",
           "legendFormat": "hit ratio",
           "refId": "A",
           "datasource": {
@@ -443,8 +438,8 @@
       },
       "targets": [
         {
-          "expr": "process_resident_memory_bytes",
-          "legendFormat": "resident",
+          "expr": "process_resident_memory_bytes{job=\"inventory-api-pods\"}",
+          "legendFormat": "{{pod}}",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -534,9 +529,7 @@
           "queryMode": "Logs",
           "region": "us-east-1",
           "id": "",
-          "logGroupNames": [
-            "/aws/containerinsights/inventory/application"
-          ],
+          "logGroupNames": ["/aws/containerinsights/inventory/application"],
           "expression": "fields @timestamp, log | filter log like /$correlationId/ | sort @timestamp asc | limit 100"
         }
       ],
@@ -545,6 +538,51 @@
         "wrapLogMessage": true,
         "sortOrder": "Ascending",
         "enableLogDetails": true
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Pods serving",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "grafanacloud-prom"
+      },
+      "description": "API pods Prometheus found and scraped. Follows the autoscaler: 2 at rest, up to 6 under load.",
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "grafanacloud-prom"
+          },
+          "expr": "count(up{job=\"inventory-api-pods\"} == 1)",
+          "legendFormat": "pods"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "area",
+        "textMode": "value",
+        "colorMode": "background",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
       }
     }
   ],
