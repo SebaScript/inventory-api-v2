@@ -12,17 +12,12 @@ const COLUMNS = [
   'updatedAt',
 ] as const;
 
-/** Characters a spreadsheet reads as the start of a formula rather than as text. */
+/** A spreadsheet reads these as the start of a formula. */
 const FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
 
 /**
- * RFC 4180: every field is quoted and interior quotes are doubled, because item
- * names and group descriptions are free text and may contain commas, quotes or
- * newlines.
- *
- * A field that starts with one of the formula characters is prefixed with an
- * apostrophe. Without that, an item named `=cmd|...` becomes a live formula
- * when the file is opened in a spreadsheet.
+ * RFC 4180 quoting. Formula characters get an apostrophe, or an item named
+ * `=cmd|...` would run when the file is opened (CSV injection).
  */
 function escape(value: unknown): string {
   if (value === null || value === undefined) return '""';
@@ -33,7 +28,6 @@ function escape(value: unknown): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-/** Builds the whole snapshot in memory, which is fine for an inventory of this size. */
 export function toCsv(items: Item[]): string {
   const rows = items.map((item) =>
     [

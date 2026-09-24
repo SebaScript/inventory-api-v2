@@ -16,20 +16,17 @@ import { setupSwagger } from './swagger';
 async function bootstrap(): Promise<void> {
   const isProduction = process.env.NODE_ENV === 'production';
 
-  // One JSON object per line, so a log collector indexes the fields instead of
-  // storing the whole line as text. `colors` has to stay off when `json` is on:
-  // together they fall back to a pretty-printed form that is not valid JSON.
+  // JSON logs in production, so CloudWatch indexes fields. `json` and `colors` exclude each other.
   const app = await NestFactory.create(AppModule, {
     logger: new ConsoleLogger({ json: isProduction, colors: !isProduction }),
   });
 
   const logger = new Logger('Bootstrap');
 
-  // Before the router, so `/api/v2/...` reaches the same handlers as `/v2/...`.
+  // Before the router: `/api/v2/...` reaches the `/v2/...` handlers.
   app.use(apiAlias);
 
-  // The original API keeps its bare paths, so nothing that already calls it
-  // breaks; only the controllers that declare a version get a `/vN` prefix.
+  // v1 keeps its bare paths; only versioned controllers get `/vN`.
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: VERSION_NEUTRAL });
 
   app.useGlobalPipes(
@@ -48,8 +45,7 @@ async function bootstrap(): Promise<void> {
 
   setupSwagger(app);
 
-  // Lets the drain in HealthController and the cache client close cleanly on
-  // SIGTERM, instead of the process dying with requests still in flight.
+  // Lets the health drain and the cache client close cleanly on SIGTERM.
   app.enableShutdownHooks();
 
   const port = Number(process.env.PORT ?? 3000);

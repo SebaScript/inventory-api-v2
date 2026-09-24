@@ -22,15 +22,11 @@ config({ quiet: true });
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      // Managed PostgreSQL refuses plaintext connections; a local one has no
-      // certificate at all. Never put `sslmode` in DATABASE_URL: node-postgres
-      // merges the connection string over this option, so the string would win
-      // and this setting would be silently ignored.
+      // RDS requires TLS. Never put `sslmode` in DATABASE_URL: it overrides this.
       ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
       entities: [Group, Item, Movement],
-      // Building the schema from the entities is this project's substitute for
-      // migrations. Two replicas doing it at once race each other, so the
-      // deployment turns it off once the schema exists.
+      // Schema from the entities, instead of migrations. Off in the cluster:
+      // two replicas building it at once would race.
       synchronize: process.env.DB_SYNC !== 'false',
       logging: ['error'],
     }),
@@ -45,8 +41,7 @@ config({ quiet: true });
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    // Correlation runs first, so the access log and the error log can both
-    // quote the same id.
+    // Correlation first, so every log line carries the id.
     consumer.apply(CorrelationMiddleware, HttpMetricsMiddleware).forRoutes('*');
   }
 }

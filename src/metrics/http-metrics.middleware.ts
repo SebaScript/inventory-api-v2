@@ -3,36 +3,28 @@ import { NextFunction, Request, Response } from 'express';
 import { correlationIdOf, currentTraceId } from '../common/correlation';
 import { httpDuration, httpRequests } from './registry';
 
-/** Probes and scrapes would drown out real traffic on every graph. */
+/** Probes and scrapes would drown out real traffic. */
 const IGNORED = /^\/(health|metrics)/;
 
 /**
- * Records one measurement and one access log line per request.
- *
- * Middleware rather than an interceptor because the work happens on the
- * response's `finish` event, which is the only place the status code is final:
- * an interceptor completes before the exception filter has written the error
- * response, so every failure would be counted as the handler's status.
+ * One metric and one access log per request, measured on `finish`: the only
+ * point where the status is final, even for errors written by the filter.
  */
 @Injectable()
 export class HttpMetricsMiddleware implements NestMiddleware {
   private readonly logger = new Logger('Request');
 
   use(request: Request, response: Response, next: NextFunction): void {
-    // `originalUrl` and not `path`: Express rewrites the url of mounted
-    // middleware, so `path` does not reliably hold the route the client asked
-    // for and the filter below would silently never match.
+    // `originalUrl`: Express rewrites `path` inside mounted middleware.
     if (IGNORED.test(request.originalUrl.split('?')[0])) return next();
 
     const startedAt = process.hrtime.bigint();
-    // Read now, not on `finish`: by the time the response is flushed the
-    // request's span is no longer the active one.
+    // Read now: on `finish` the span is no longer active.
     const traceId = currentTraceId();
 
     response.on('finish', () => {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-      // The matched pattern, not the URL: `/v2/items/:id` is one time series,
-      // `/v2/items/37` would be one per item.
+      // The pattern, not the URL: one time series per route, not per id.
       const route = request.route?.path ?? 'unmatched';
       const status = String(response.statusCode);
 

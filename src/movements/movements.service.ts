@@ -25,6 +25,8 @@ export class MovementsService {
     const movement = await this.dataSource.transaction(async (manager) => {
       const item = await manager
         .createQueryBuilder(Item, 'item')
+        // SELECT ... FOR UPDATE: concurrent movements on one item wait their turn,
+        // so two of them can never both spend the same stock.
         .setLock('pessimistic_write')
         .where('item.id = :id', { id: dto.itemId })
         .getOne();
@@ -43,8 +45,7 @@ export class MovementsService {
       return manager.save(manager.create(Movement, { ...dto, resultingStock }));
     });
 
-    // A movement changes the stock, which also moves the item in and out of the
-    // lowStock filter, so every cached listing is now suspect.
+    // Stock changed: every cached listing is now stale.
     await this.cache.bump(ITEMS_NAMESPACE);
     return movement;
   }

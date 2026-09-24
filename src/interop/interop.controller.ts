@@ -16,11 +16,7 @@ import { CORRELATION_HEADER } from '../common/correlation';
 import { FlowMessage, InteropRecord } from './interop.contract';
 import { InteropService } from './interop.service';
 
-/**
- * The half of the contract the other cloud consumes. Its own resource rather
- * than a route under `/v2/items`, so it never competes with `@Get(':id')` and
- * so the shared contract can evolve without touching the items API.
- */
+/** What the other cloud calls. Own resource, so it never competes with `@Get(':id')`. */
 @ApiTags('Interop v2')
 @Controller({ path: 'interop', version: '2' })
 export class InteropV2Controller {

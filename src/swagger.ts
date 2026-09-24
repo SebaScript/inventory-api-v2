@@ -4,9 +4,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 export function setupSwagger(app: INestApplication): void {
   const config = new DocumentBuilder()
     .setTitle('Inventory API')
-    // OpenAPI 3.0 has a closed list of methods that excludes `query`, so the
-    // QUERY endpoint cannot be listed as an operation. This paragraph is the
-    // only place the published documentation can mention it.
+    // OpenAPI 3.0 cannot list the QUERY method: this is the only place it is documented.
     .setDescription(
       'Inventory management over three entities: Group -> Item -> Movement.\n\n' +
         'Every resource is served twice: at its bare path, and under `/v2`, which ' +

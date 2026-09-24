@@ -1,16 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-/** How this service names itself to the other cloud. */
 export const SERVICE_NAME = 'inventory-api';
 
-/**
- * The one shape both clouds agree on.
- *
- * Deliberately says nothing about inventories, orders or any other domain: each
- * side maps whichever entity it wants into these five fields, so neither API has
- * to know the other's model. `attributes` is the escape hatch for the two or
- * three values worth showing, and stays flat and small on purpose.
- */
+/** The shape both clouds agree on. Domain-agnostic: neither API knows the other's model. */
 export class InteropRecord {
   @ApiProperty({ example: SERVICE_NAME, description: 'Which API this came from' })
   source: string;
@@ -34,11 +26,7 @@ export class InteropRecord {
   retrievedAt: string;
 }
 
-/**
- * What a lookup against the other cloud produced. It reports its own status
- * rather than throwing, because the partner being unreachable must never turn
- * a perfectly good local read into an error.
- */
+/** Reports a status instead of throwing: the other cloud must never break a local read. */
 export class PartnerLookup {
   @ApiProperty({
     enum: ['ok', 'unavailable', 'disabled'],
@@ -52,7 +40,6 @@ export class PartnerLookup {
   record: InteropRecord | null;
 }
 
-/** A file this API wrote while the message passed through it. */
 export class FlowAttachment {
   @ApiProperty({ example: SERVICE_NAME })
   source: string;
@@ -67,11 +54,7 @@ export class FlowAttachment {
   expiresInSeconds: number;
 }
 
-/**
- * The message the orchestrator carries from one API to the next. Only the
- * fields this API writes are described: anything else in it belongs to the
- * other steps and is passed through as it came.
- */
+/** The orchestrator's message. Unknown fields belong to other steps and pass through. */
 export class FlowMessage {
   [key: string]: unknown;
 

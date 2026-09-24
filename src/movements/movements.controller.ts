@@ -5,10 +5,7 @@ import { Movement } from '../entities/movement.entity';
 import { CreateMovementDto, FindMovementsDto } from './movement.dto';
 import { MovementsService } from './movements.service';
 
-/**
- * Every route of the resource, with no path and no version of its own. Each
- * version below mounts it, so a version only has to declare what it changes.
- */
+/** Every route, with no path or version: each version mounts it and overrides what changes. */
 export abstract class MovementsControllerBase {
   constructor(protected readonly service: MovementsService) {}
 
@@ -42,8 +39,7 @@ export abstract class MovementsControllerBase {
 @ApiTags('Movements')
 @Controller('movements')
 export class MovementsController extends MovementsControllerBase {
-  // Declared on purpose: without it TypeScript emits no `design:paramtypes`
-  // for this class and Nest injects `undefined` instead of failing to start.
+  // Required: without it Nest injects `undefined` instead of failing.
   constructor(service: MovementsService) {
     super(service);
   }

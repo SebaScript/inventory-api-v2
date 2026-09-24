@@ -2,12 +2,7 @@ import { Controller, HttpCode, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ExportResult, ExportsService } from './exports.service';
 
-/**
- * Its own resource rather than a route under `/v2/items`, for two reasons: a
- * sibling of the base controller's `@Get(':id')` would depend on route
- * ordering, and POST is the honest verb because the call creates an object in
- * storage every time it runs.
- */
+/** POST: every call creates a file in S3. Own resource, so it never competes with `@Get(':id')`. */
 @ApiTags('Exports v2')
 @Controller({ path: 'exports', version: '2' })
 export class ExportsV2Controller {

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-/** Short on purpose: the link is the only access path to a private bucket. */
+/** The link is the only way into a private bucket, so it expires fast. */
 export const URL_EXPIRY_SECONDS = 900;
 
 export interface StoredObject {
@@ -12,22 +12,15 @@ export interface StoredObject {
   expiresInSeconds: number;
 }
 
-/**
- * The one place that talks to the bucket. Shared by the CSV export and by the
- * flow attachments, so both write encrypted objects and hand back the same
- * kind of short-lived link.
- */
+/** The only code that talks to S3: encrypted writes and short-lived links. */
 @Injectable()
 export class ObjectStorageService {
   private readonly client?: S3Client;
   private readonly bucket?: string;
 
   constructor() {
-    // Read here rather than at module scope: dotenv is loaded by app.module.ts,
-    // which runs after this file is imported.
+    // Without a bucket no client is built, so tests need no credentials.
     this.bucket = process.env.S3_BUCKET;
-    // Built only when a bucket is configured, so nothing resolves credentials
-    // during the test suite.
     if (this.bucket) this.client = new S3Client({});
   }
 
@@ -35,7 +28,6 @@ export class ObjectStorageService {
     return this.client !== undefined && this.bucket !== undefined;
   }
 
-  /** Callers check `configured` first: each decides whether a missing bucket is an error. */
   async put(key: string, body: string, contentType: string): Promise<StoredObject> {
     if (!this.client || !this.bucket) throw new Error('Object storage is not configured');
 
@@ -49,8 +41,7 @@ export class ObjectStorageService {
       }),
     );
 
-    // A presigned URL carries the signer's own permissions, so the pod role
-    // needs GetObject even though it is the client that downloads the file.
+    // Signed with the pod's permissions: the role needs GetObject too.
     const url = await getSignedUrl(
       this.client,
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),

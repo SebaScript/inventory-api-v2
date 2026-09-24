@@ -3,22 +3,17 @@ import Redis from 'ioredis';
 import { emitCacheMetrics } from '../common/metrics';
 import { cacheHits, cacheMisses } from '../metrics/registry';
 
-/**
- * Namespaces are the unit of invalidation. Declared here, next to the cache, so
- * the services that invalidate never have to import from a controller.
- */
+/** Namespaces are the unit of invalidation. */
 export const ITEMS_NAMESPACE = 'items';
-/** Records fetched from the other cloud. Separate epoch, so invalidating one
- * does not throw away the other. */
 export const PARTNER_NAMESPACE = 'partner';
 
-/** What a read returns: the value when it is a hit, and always the epoch to write back. */
+/** A hit carries the value; every read returns the epoch to write back with. */
 export interface CacheRead<T> {
   value?: T;
   epoch: string;
 }
 
-/** Stored shape: the epoch the entry was written under, plus the payload. */
+/** Stored shape: the epoch it was written under, plus the payload. */
 interface Entry {
   e: string;
   d: unknown;
@@ -28,13 +23,11 @@ const METRICS_INTERVAL_MS = 60_000;
 const ERROR_LOG_INTERVAL_MS = 60_000;
 
 /**
- * A distributed cache that is always optional. Without REDIS_URL no client is
- * constructed at all, and every method answers as a miss, so the API keeps
- * serving from the database and the test suite needs no cache server.
+ * Optional distributed cache: without REDIS_URL every read is a miss and the
+ * API serves from the database.
  *
- * Invalidation is an epoch counter per namespace rather than a key scan: a
- * write is one INCR, and stale entries are ignored on read and expire by TTL.
- * Scanning the keyspace to delete matching keys blocks the whole cache node.
+ * Invalidation bumps an epoch counter per namespace (one INCR) instead of
+ * scanning keys, which would block the cache node.
  */
 @Injectable()
 export class CacheService implements OnApplicationShutdown {
@@ -47,28 +40,23 @@ export class CacheService implements OnApplicationShutdown {
   private lastErrorLoggedAt = 0;
 
   constructor() {
-    // Read the environment here, not at module scope: dotenv is loaded inside
-    // app.module.ts, which runs after this file has been imported.
+    // Read here, not at module scope: dotenv loads after this file is imported.
     const url = process.env.REDIS_URL;
     if (!url) return;
 
     this.client = new Redis(url, {
-      // Fail the command instead of queueing it until the cache comes back.
-      // Queueing turns a cache outage into a latency outage.
+      // Fail fast: queueing would turn a cache outage into a latency outage.
       enableOfflineQueue: false,
       maxRetriesPerRequest: 1,
       connectTimeout: 1_000,
       retryStrategy: (times) => Math.min(times * 200, 5_000),
     });
 
-    // Without this listener an `error` event is unhandled and Node exits, so a
-    // cache outage would crash-loop the pods.
+    // Without a listener, an `error` event crashes Node.
     this.client.on('error', (error: Error) => this.logThrottled(error));
 
     if (process.env.NODE_ENV === 'production') {
       this.metricsTimer = setInterval(() => this.flushMetrics(), METRICS_INTERVAL_MS);
-      // An un-unref'd timer keeps the event loop alive: it hangs Jest and
-      // delays pod shutdown.
       this.metricsTimer.unref();
     }
   }
@@ -77,7 +65,7 @@ export class CacheService implements OnApplicationShutdown {
     return this.client !== undefined;
   }
 
-  /** Reads the entry and its namespace epoch in a single round trip. */
+  /** Entry and epoch in one round trip. */
   async read<T>(namespace: string, key: string): Promise<CacheRead<T>> {
     if (!this.client) return { epoch: '0' };
 
@@ -87,7 +75,7 @@ export class CacheService implements OnApplicationShutdown {
 
       if (raw) {
         const entry = JSON.parse(raw) as Entry;
-        // An entry written before the last invalidation is a miss, not a value.
+        // Written before the last invalidation: a miss.
         if (entry.e === current) {
           this.hits += 1;
           cacheHits.inc();
@@ -104,11 +92,7 @@ export class CacheService implements OnApplicationShutdown {
     }
   }
 
-  /**
-   * Stores the value against the epoch that was current when the read happened.
-   * A write that lands in between leaves this entry stale, so the next read
-   * discards it: the race can waste an entry, it cannot serve stale data.
-   */
+  /** Stored under the epoch read earlier: a write in between just makes it stale. */
   async write(
     namespace: string,
     key: string,
@@ -126,7 +110,7 @@ export class CacheService implements OnApplicationShutdown {
     }
   }
 
-  /** Invalidates a whole namespace in one operation. */
+  /** Invalidates a whole namespace. */
   async bump(namespace: string): Promise<void> {
     if (!this.client) return;
 
@@ -144,8 +128,7 @@ export class CacheService implements OnApplicationShutdown {
     try {
       await this.client.quit();
     } catch {
-      // quit() can hang on a client that is mid-reconnect, and a hung shutdown
-      // hook means the pod is killed instead of stopping cleanly.
+      // quit() can hang mid-reconnect.
       this.client.disconnect();
     }
   }
@@ -162,7 +145,7 @@ export class CacheService implements OnApplicationShutdown {
     this.misses = 0;
   }
 
-  /** One line a minute: a long outage must not flood the log with one line per request. */
+  /** At most one line a minute during an outage. */
   private logThrottled(error: Error): void {
     const now = Date.now();
     if (now - this.lastErrorLoggedAt < ERROR_LOG_INTERVAL_MS) return;

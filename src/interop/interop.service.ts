@@ -15,16 +15,10 @@ import {
   SERVICE_NAME,
 } from './interop.contract';
 
-/** Short on purpose: this runs inside a GET, so it must never hold the response. */
+/** Runs inside a GET: it must never hold the response. */
 const DEFAULT_TIMEOUT_MS = 1_500;
 
-/**
- * How long a record from the other cloud may be reused.
- *
- * Short because the partner returns a *random* record each time, so a long TTL
- * would freeze the same one on screen and make a live demo look broken. Long
- * enough that a burst of reads does not become a burst of cross-cloud calls.
- */
+/** Short: the partner returns a random record, so a long TTL would freeze one. */
 const DEFAULT_CACHE_TTL_SECONDS = 30;
 
 @Injectable()
@@ -41,13 +35,7 @@ export class InteropService {
     return Boolean(process.env.ORCHESTRATOR_URL && process.env.PARTNER_KEY);
   }
 
-  /**
-   * One random active item, mapped to the shared shape.
-   *
-   * `ORDER BY RANDOM()` scans the table, which is the right trade-off for a
-   * catalogue of this size and the wrong one for millions of rows; the usual
-   * replacement is picking a random id within the known range.
-   */
+  /** One random active item. `ORDER BY RANDOM()` is fine at this table size. */
   async randomLocalRecord(): Promise<InteropRecord | null> {
     const item = await this.items
       .createQueryBuilder('item')
@@ -60,36 +48,22 @@ export class InteropService {
     return item ? toRecord(item) : null;
   }
 
-  /**
-   * A chosen item rather than a random one, in the same shape. Active or not:
-   * whoever names the item is asking for that one, and a discontinued item is
-   * still a real record.
-   */
   async localRecord(id: number): Promise<InteropRecord | null> {
     const item = await this.items.findOne({ where: { id }, relations: { group: true } });
     return item ? toRecord(item) : null;
   }
 
   /**
-   * Asks the orchestrator for a record from the other cloud, through the cache.
-   *
-   * Never throws and never propagates a failure: an unreachable partner
-   * degrades to `unavailable`, so the local read still answers.
-   *
-   * Only successful lookups are cached. Storing a failure would stretch a
-   * momentary outage across the whole TTL, which is the opposite of what a
-   * cache is for.
+   * A record from the other cloud, through the cache. Never throws: a failure
+   * degrades to `unavailable`. Only successes are cached, so an outage does not
+   * outlive itself.
    */
   async fetchPartnerRecord(correlationId?: string): Promise<PartnerLookup> {
     if (!this.partnerConfigured) return { status: 'disabled', record: null };
 
     const partner = process.env.PARTNER_KEY!;
-    // Keyed by partner, so a second cloud gets its own entry rather than
-    // overwriting this one.
     const { value, epoch } = await this.cache.read<InteropRecord>(PARTNER_NAMESPACE, partner);
     if (value) {
-      // Counted apart from `ok`: the cross-cloud panel would otherwise look
-      // like the integration had gone quiet whenever the cache was working.
       partnerLookups.inc({ outcome: 'cached' });
       return { status: 'ok', record: value };
     }
@@ -99,7 +73,6 @@ export class InteropService {
     const timeout = Number(process.env.INTEROP_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
 
     const headers: Record<string, string> = { Accept: 'application/json' };
-    // Propagated so one identifier follows the call through both clouds.
     if (correlationId) headers[CORRELATION_HEADER] = correlationId;
     if (process.env.ORCHESTRATOR_API_KEY) {
       headers['x-api-key'] = process.env.ORCHESTRATOR_API_KEY;
@@ -131,21 +104,14 @@ export class InteropService {
   }
 
   /**
-   * One step of the cross-cloud flow: adds an entity from this API to the
-   * message and keeps the accumulated JSON in object storage.
-   *
-   * Whatever the message already carries is kept untouched: this API only
-   * appends to `entities` and `attachments`, so no step can erase another's.
-   * Without a bucket the entity is still added and no attachment is written,
-   * the same way every other cloud feature degrades here.
+   * This API's step in the flow: appends an item to the message and stores the
+   * accumulated JSON in S3. Only appends, so no step erases another's.
    */
   async appendToMessage(
     message: Record<string, unknown>,
     correlationId?: string,
     itemId?: number,
   ): Promise<FlowMessage | null> {
-    // A chosen item makes the step repeatable: change that item, send the
-    // message again, and the change is in it. A random one cannot show that.
     const record =
       itemId === undefined ? await this.randomLocalRecord() : await this.localRecord(itemId);
     if (!record) return null;
@@ -171,14 +137,7 @@ export class InteropService {
     };
   }
 
-  /**
-   * Drops the cached partner records so the next read goes back to the other
-   * cloud. One INCR, whatever the number of entries.
-   *
-   * Exists because the TTL bounds how stale a record can get, but nothing else
-   * can force a refresh: after the partner changes a record, this is what makes
-   * the change visible immediately instead of up to a TTL later.
-   */
+  /** Forces the next read back to the other cloud: one INCR. */
   async invalidatePartnerCache(): Promise<{ invalidated: boolean }> {
     await this.cache.bump(PARTNER_NAMESPACE);
     return { invalidated: this.cache.enabled };
@@ -191,11 +150,7 @@ export class InteropService {
   }
 }
 
-/**
- * The correlation id arrives from another cloud and becomes part of an object
- * key, so it is reduced to characters that cannot climb out of the prefix or
- * split it into extra segments.
- */
+/** The id comes from another cloud and ends up in an S3 key: no `/` or `..`. */
 function safeSegment(value: string): string {
   return value
     .replace(/[^A-Za-z0-9._-]/g, '_')
@@ -204,7 +159,6 @@ function safeSegment(value: string): string {
     .slice(0, 128);
 }
 
-/** The one mapping from an Item to the shape both clouds agreed on. */
 function toRecord(item: Item): InteropRecord {
   return {
     source: SERVICE_NAME,

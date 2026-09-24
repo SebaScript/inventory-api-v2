@@ -13,22 +13,14 @@ import { ItemsService } from './items.service';
 
 const LIST_TTL_SECONDS = 30;
 
-/** The item as always, plus whatever the other cloud had to offer. */
 export class ItemWithPartner extends Item {
   @ApiProperty({ type: PartnerLookup })
   partner: PartnerLookup;
 }
 
 /**
- * Two queries that return the same rows must produce the same key, or the hit
- * rate halves for no reason:
- *   - no status and `status=ACTIVE` are the same query, because the service
- *     defaults to ACTIVE;
- *   - the search is matched with ILIKE, so its case does not affect the result.
- *
- * Hashed because `search` has no maximum length, so the raw key could be
- * megabytes long and free text could collide with another query by injecting
- * the separator.
+ * Same rows, same key: no status equals ACTIVE, and search is case-insensitive.
+ * Hashed because `search` has no length limit.
  */
 export function itemsListKey(query: FindItemsDto): string {
   const canonical = JSON.stringify([
@@ -43,15 +35,11 @@ export function itemsListKey(query: FindItemsDto): string {
   return `list:${createHash('sha1').update(canonical).digest('base64url')}`;
 }
 
-/**
- * `/v2/items`: the same routes and the same service as v1, with the listing
- * served from the distributed cache.
- */
+/** `/v2/items`: the v1 routes, plus a cached listing and the other cloud's record. */
 @ApiTags('Items v2')
 @Controller({ path: 'items', version: '2' })
 export class ItemsV2Controller extends ItemsControllerBase {
-  // Declared on purpose: without it TypeScript emits no `design:paramtypes`
-  // for this class and Nest injects `undefined` instead of failing to start.
+  // Required: without it Nest injects `undefined` instead of failing.
   constructor(
     service: ItemsService,
     private readonly cache: CacheService,
@@ -60,9 +48,7 @@ export class ItemsV2Controller extends ItemsControllerBase {
     super(service);
   }
 
-  // `@Get()` and `@Query()` have to be repeated. Route metadata is read off the
-  // function object, not the class, so an override without them shadows the
-  // decorated base method and the route disappears with no error at all.
+  // Overrides must repeat the route decorators, or the route silently disappears.
   @Get()
   @ApiOperation({ summary: 'List items, served from a short-lived distributed cache' })
   override async findAll(@Query() query: FindItemsDto): Promise<Paginated<Item>> {
@@ -75,8 +61,6 @@ export class ItemsV2Controller extends ItemsControllerBase {
     return page;
   }
 
-  // Same rule as above: the decorators have to be repeated on the override, and
-  // `@Param` has to keep its pipe or the id would arrive as a string.
   @Get(':id')
   @ApiOperation({
     summary: 'Get one item, together with a record from the other cloud',
@@ -90,8 +74,7 @@ export class ItemsV2Controller extends ItemsControllerBase {
     @Param('id', ParseIntPipe) id: number,
     @Headers(CORRELATION_HEADER) correlationId?: string,
   ): Promise<ItemWithPartner> {
-    // The local read first: if the item does not exist, this throws 404 and the
-    // other cloud is never even called.
+    // Local first: an unknown id 404s without calling the other cloud.
     const item = await this.service.findOne(id);
     const partner = await this.interop.fetchPartnerRecord(correlationId);
 

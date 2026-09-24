@@ -8,7 +8,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
-/** Time to keep serving after being taken out of rotation, before the socket closes. */
+/** Keeps serving in-flight requests after leaving the load balancer. */
 const DRAIN_MS = 5_000;
 
 @ApiTags('Health')
@@ -58,14 +58,10 @@ export class HealthController implements BeforeApplicationShutdown {
     return this.check();
   }
 
-  /**
-   * Runs before the HTTP server closes. Kubernetes removes the pod from the
-   * load balancer and sends SIGTERM at the same time, so without this pause
-   * requests already in flight hit a closed socket during every rollout.
-   */
+  /** Kubernetes sends SIGTERM as it removes the pod: fail readiness, then wait. */
   async beforeApplicationShutdown(signal?: string): Promise<void> {
     this.shuttingDown = true;
-    // No signal means a programmatic close, as the tests do: nothing to drain.
+    // No signal: a programmatic close (tests), nothing to drain.
     if (!signal) return;
 
     await new Promise((resolve) => setTimeout(resolve, DRAIN_MS));

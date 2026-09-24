@@ -5,9 +5,7 @@ import { StorageModule } from '../storage/storage.module';
 import { InteropV2Controller } from './interop.controller';
 import { InteropService } from './interop.service';
 
-// Takes the Item repository directly instead of ItemsService, so ItemsModule
-// never has to export anything and there is no cycle: ItemsModule imports this
-// one, not the other way round.
+// Uses the Item repository directly: no import cycle with ItemsModule.
 @Module({
   imports: [TypeOrmModule.forFeature([Item]), StorageModule],
   controllers: [InteropV2Controller],

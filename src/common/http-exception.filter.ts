@@ -15,9 +15,7 @@ const UNIQUE_VIOLATION = '23505';
 const FOREIGN_KEY_VIOLATION = '23503';
 const CHECK_VIOLATION = '23514';
 
-/**
- * Handles exceptions and converts them to a consistent JSON response.
- */
+/** Every error becomes the same JSON shape. */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger('ExceptionFilter');
@@ -32,16 +30,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const { status, code, message, extra } = this.describe(exception);
 
     if (status >= 500) {
-      // One argument, one log event. Passing the error as a second argument
-      // makes Nest emit two separate events and drop the stack field, which
-      // leaves nothing to correlate them by but the timestamp.
+      // One argument: a second one splits this into two events and loses the stack.
       this.logger.error({
         method: request.method,
         url: request.url,
         statusCode: status,
         code,
-        // Ties this failure to the same request as seen by the caller and by
-        // any service in front of it.
         correlationId: correlationIdOf(request),
         stack: exception instanceof Error ? exception.stack : String(exception),
       });

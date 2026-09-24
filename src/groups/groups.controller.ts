@@ -16,10 +16,7 @@ import { Group } from '../entities/group.entity';
 import { CreateGroupDto, FindGroupsDto, UpdateGroupDto } from './group.dto';
 import { GroupsService } from './groups.service';
 
-/**
- * Every route of the resource, with no path and no version of its own. Each
- * version below mounts it, so a version only has to declare what it changes.
- */
+/** Every route, with no path or version: each version mounts it and overrides what changes. */
 export abstract class GroupsControllerBase {
   constructor(protected readonly service: GroupsService) {}
 
@@ -63,8 +60,7 @@ export abstract class GroupsControllerBase {
 @ApiTags('Groups')
 @Controller('groups')
 export class GroupsController extends GroupsControllerBase {
-  // Declared on purpose: without it TypeScript emits no `design:paramtypes`
-  // for this class and Nest injects `undefined` instead of failing to start.
+  // Required: without it Nest injects `undefined` instead of failing.
   constructor(service: GroupsService) {
     super(service);
   }

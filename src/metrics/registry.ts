@@ -1,25 +1,16 @@
 import { Counter, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
-/**
- * A registry of this application's own, rather than the library's global one,
- * so nothing a dependency registers leaks into what is published.
- *
- * Plain module state and not a Nest provider: these are process-wide counters
- * with no dependencies, and going through injection would only add a module
- * import to every file that counts something.
- */
+/** Our own registry, so nothing a dependency registers leaks into /metrics. */
 export const registry = new Registry();
 
 registry.setDefaultLabels({ service: 'inventory-api' });
-// Process memory, CPU and event loop lag, which is what most Grafana dashboards
-// for a Node service start from.
+// Process memory, CPU and event loop lag.
 collectDefaultMetrics({ register: registry });
 
 export const httpRequests = new Counter({
   name: 'http_requests_total',
   help: 'HTTP requests handled, by route and outcome',
-  // `route` is the route pattern, never the resolved URL: a label built from
-  // `/v2/items/37` would create one time series per item id.
+  // `route` is the pattern, never the URL: one series per route, not per id.
   labelNames: ['method', 'route', 'status'] as const,
   registers: [registry],
 });

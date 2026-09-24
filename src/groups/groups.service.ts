@@ -46,16 +46,14 @@ export class GroupsService {
     await this.findOne(id);
     if (dto.name) await this.assertNameIsFree(dto.name, id);
     await this.groups.update(id, dto);
-    // Cached item listings embed the joined group, so a rename here would stay
-    // invisible until the entry expired.
+    // Cached listings embed the group: a rename invalidates them.
     await this.cache.bump(ITEMS_NAMESPACE);
     return this.findOne(id);
   }
 
   async remove(id: number): Promise<void> {
     await this.findOne(id);
-    // Checked here so the client gets an explanation instead of the raw
-    // foreign-key error the database would otherwise raise.
+    // A clear error instead of the raw foreign-key one.
     if (await this.items.countBy({ groupId: id })) throw new GroupNotEmptyException(id);
     await this.groups.delete(id);
   }

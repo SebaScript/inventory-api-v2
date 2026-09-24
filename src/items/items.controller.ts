@@ -17,10 +17,7 @@ import { Item } from '../entities/item.entity';
 import { CreateItemDto, FindItemsDto, SearchItemsDto, UpdateItemDto } from './item.dto';
 import { ItemsService } from './items.service';
 
-/**
- * Every route of the resource, with no path and no version of its own. Each
- * version below mounts it, so a version only has to declare what it changes.
- */
+/** Every route, with no path or version: each version mounts it and overrides what changes. */
 export abstract class ItemsControllerBase {
   constructor(protected readonly service: ItemsService) {}
 
@@ -86,8 +83,7 @@ export abstract class ItemsControllerBase {
 @ApiTags('Items')
 @Controller('items')
 export class ItemsController extends ItemsControllerBase {
-  // Declared on purpose: without it TypeScript emits no `design:paramtypes`
-  // for this class and Nest injects `undefined` instead of failing to start.
+  // Required: without it Nest injects `undefined` instead of failing.
   constructor(service: ItemsService) {
     super(service);
   }

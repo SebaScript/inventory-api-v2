@@ -3,12 +3,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../app.module';
 import { seed } from './seed';
 
-/**
- * Seeds the demo data and exits. The application refuses to seed on boot when
- * NODE_ENV is production, which is deliberate: filling a database is an
- * explicit operation, not a side effect of starting a process. This is how it
- * is asked for explicitly, as a one-off job.
- */
+/** Seeds and exits: in production, seeding is an explicit one-off job, never a side effect of boot. */
 async function main(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
 
