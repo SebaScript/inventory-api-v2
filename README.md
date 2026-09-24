@@ -32,18 +32,19 @@ the other side is fetched over HTTP, in real time, through the orchestrator.
 
 ```mermaid
 flowchart LR
-  client([Client])
+  client([Client / Postman])
 
   subgraph AWS["AWS &mdash; operated by SebaScript"]
-    gw[API Gateway REST<br/>API key + usage plan]
-    nlb[Internal NLB]
+    gw[API Gateway REST<br/>TLS, API key, rate limit]
+    nlb[Internal NLB<br/>via VPC Link]
     subgraph eks["EKS Auto Mode"]
-      pods[inventory-api<br/>2-6 replicas, HPA]
+      pods[inventory-api<br/>2-6 replicas, HPA, PDB]
+      otel[OpenTelemetry<br/>Collector]
     end
     rds[(RDS PostgreSQL)]
-    cache[(ElastiCache Valkey)]
-    s3[(S3 exports)]
-    cw[CloudWatch<br/>logs, metrics, alarm]
+    cache[(ElastiCache Valkey<br/>partner records, TTL 30 s)]
+    s3[(S3<br/>flow attachments, exports)]
+    cw[CloudWatch<br/>logs, Container Insights,<br/>X-Ray, Application Signals]
   end
 
   subgraph GCP["Google Cloud &mdash; operated by the partner"]
@@ -52,24 +53,35 @@ flowchart LR
     orders[orders-api]
   end
 
-  grafana[Grafana<br/>Prometheus]
+  subgraph GC["Grafana Cloud &mdash; this API's own stack"]
+    mimir[Prometheus metrics]
+    tempo[Tempo traces]
+    dash[Dashboard + alert]
+  end
+
+  prom[Prometheus<br/>scraper]
 
   client --> gw --> nlb --> pods
   pods --> rds & cache & s3
-  pods -.-> cw
   pods -- "GET /interop/orders/random" --> orch
-  orch --> orders
+  orch -- "GET /v2/interop/random<br/>POST /v2/interop/messages" --> gw
   orch --> queue --> orders
-  orch -- "GET /v2/interop/random" --> gw
-  grafana -- "scrapes /metrics/{api}" --> orch
+  pods -- OTLP --> otel
+  otel --> cw
+  otel --> tempo
+  pods -. logs .-> cw
+  prom -- "scrapes /metrics/inventory" --> orch
+  prom -- remote_write --> mimir
+  mimir & tempo --> dash
+  dash -. "reads logs via IAM role" .-> cw
 ```
 
 ### Who operates what
 
-|                | Cloud        | Owns                                                                                                           |
-| -------------- | ------------ | -------------------------------------------------------------------------------------------------------------- |
-| **SebaScript** | AWS          | `inventory-api` on EKS, RDS, **the cache** (ElastiCache), **the object storage** (S3), API Gateway, CloudWatch |
-| **Partner**    | Google Cloud | `orders-api`, **the orchestrator**, **the queue** (Pub/Sub + dead-letter topic)                                |
+|                | Cloud        | Owns                                                                                                                                        |
+| -------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **SebaScript** | AWS          | `inventory-api` on EKS, RDS, **the cache** (ElastiCache), **the object storage** (S3), API Gateway, CloudWatch, its own Grafana Cloud stack |
+| **Partner**    | Google Cloud | `orders-api`, **the orchestrator**, **the queue** (Pub/Sub + dead-letter topic), its own Grafana Cloud stack                                |
 
 The group is two people rather than three, so the transversal components split
 two-one instead of one-one-one. Each complete API still lives in a different
@@ -77,15 +89,19 @@ provider, and no component is duplicated across clouds.
 
 ### Why these services
 
-| Need                            | Service              | Why this one                                                                                                                                         |
-| ------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| API key that cannot be bypassed | API Gateway **REST** | API keys and usage plans exist only in REST APIs, not HTTP APIs. The NLB behind it is internal, so the key cannot be skipped by calling the balancer |
-| Kubernetes                      | EKS **Auto Mode**    | Ships the load balancer controller, Pod Identity and the node monitoring agent. Fargate runs no DaemonSets, which rules out all three                |
-| Database                        | RDS PostgreSQL       | The engine the app already speaks. Forces TLS from version 15                                                                                        |
-| Cache                           | ElastiCache Valkey   | Shared by every replica, so a record fetched from the other cloud is reused across pods                                                              |
-| Object storage                  | S3                   | Private bucket, reached through presigned URLs, so no object is ever public                                                                          |
-| Monitoring in our own cloud     | CloudWatch           | Native, and the metric is written in EMF: no SDK, no API calls, no IAM permissions                                                                   |
-| Monitoring across clouds        | Prometheus + Grafana | Open format, works in any provider, and reads both APIs through one orchestrator path                                                                |
+| Need                            | Service                                               | Why this one                                                                                                                                     |
+| ------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| API key that cannot be bypassed | API Gateway **REST**                                  | API keys and usage plans exist only in REST APIs, not HTTP APIs. The usage plan also rate-limits every key to 10 requests a second, bursts of 20 |
+| Load balancing                  | Internal **NLB**, reached through a **VPC Link**      | Spreads requests over the replicas. Internal, so the only way in is the gateway: the key cannot be skipped by calling the balancer               |
+| Kubernetes                      | EKS **Auto Mode**                                     | Ships the load balancer controller, Pod Identity and the node monitoring agent. Fargate runs no DaemonSets, which rules out all three            |
+| Secrets                         | Kubernetes **Secret** + **EKS Pod Identity**          | The database URL and the orchestrator key live in a Secret; S3 access comes from a pod role, so no AWS key exists anywhere                       |
+| Container registry              | **ECR**                                               | Private, in the same region as the cluster, pulled with the node role                                                                            |
+| Database                        | RDS PostgreSQL                                        | The engine the app already speaks. Forces TLS from version 15                                                                                    |
+| Cache                           | ElastiCache Valkey                                    | Shared by every replica, so a record fetched from the other cloud is reused across pods                                                          |
+| Object storage                  | S3                                                    | Private bucket, reached through presigned URLs, so no object is ever public                                                                      |
+| Monitoring in our own cloud     | CloudWatch                                            | Logs, Container Insights, X-Ray and Application Signals, all native. The cache metric is written in EMF: no SDK, no API calls                    |
+| Tracing                         | OpenTelemetry, auto-injected, through a **Collector** | The SDK is injected by the cluster, not bundled. The collector sends each trace to both X-Ray and Grafana Cloud                                  |
+| Monitoring as a service         | **Grafana Cloud**, this API's own stack               | Metrics, traces and a dashboard in one place; logs are read from CloudWatch through an IAM role, with no access key                              |
 
 ## Versions
 
