@@ -18,6 +18,7 @@ deploy/config.yaml
 # one specific AWS account. The committed *.example.yaml files are the source.
 deploy/deployment.yaml
 deploy/seed-job.yaml
+deploy/prometheus.yaml
 # Operational scripts written for one account, in Spanish. Same reason as the
 # study material: useful locally, out of place in the repository.
 deploy/*-aws.ps1
