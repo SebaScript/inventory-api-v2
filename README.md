@@ -40,6 +40,7 @@ flowchart LR
     subgraph eks["EKS Auto Mode"]
       pods[inventory-api<br/>2-6 replicas, HPA, PDB]
       otel[OpenTelemetry<br/>Collector]
+      prom[Prometheus agent]
     end
     rds[(RDS PostgreSQL)]
     cache[(ElastiCache Valkey<br/>partner records, TTL 30 s)]
@@ -59,8 +60,6 @@ flowchart LR
     dash[Dashboard + alert]
   end
 
-  prom[Prometheus<br/>scraper]
-
   client --> gw --> nlb --> pods
   pods --> rds & cache & s3
   pods -- "GET /interop/orders/random" --> orch
@@ -70,7 +69,8 @@ flowchart LR
   otel --> cw
   otel --> tempo
   pods -. logs .-> cw
-  prom -- "scrapes /metrics/inventory" --> orch
+  prom -- "scrapes each pod" --> pods
+  prom -. "health check: /metrics/inventory" .-> orch
   prom -- remote_write --> mimir
   mimir & tempo --> dash
   dash -. "reads logs via IAM role" .-> cw

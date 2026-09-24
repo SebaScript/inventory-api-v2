@@ -1,89 +1,87 @@
 # Observability — Prometheus and Grafana for the inventory API
 
-One Prometheus and one Grafana per API. This is the inventory one; the other
-team runs its own, pointed at the same orchestrator on a different path.
+Each API has its own, independent observability stack. This is the inventory
+one.
 
-## Start it
+## Where things run
+
+| Piece                             | Where                                                                  | Defined in                                |
+| --------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------- |
+| **Prometheus** (agent mode)       | **In the EKS cluster**                                                 | `deploy/prometheus.example.yaml`          |
+| Metrics storage, dashboard, alert | Grafana Cloud, this API's own stack                                    | `dashboards/inventory.grafana-cloud.json` |
+| Traces                            | OpenTelemetry collector in the cluster → X-Ray and Grafana Cloud Tempo | `deploy/otel-collector.yaml`              |
+| Logs                              | CloudWatch, read from Grafana through an IAM role                      | —                                         |
+
+## The in-cluster Prometheus
+
+It runs in **agent mode**: it scrapes and forwards with `remote_write`, and
+keeps no database of its own. Everything is queried in Grafana Cloud.
+
+It scrapes two things:
+
+1. **Every API pod, directly.** Pods are found through the Kubernetes API, so
+   the target list follows the autoscaler. This is where every number on the
+   dashboard comes from.
+2. **`/metrics/inventory` on the orchestrator**, the path the other cloud reads.
+   Only as a health check: `up` says whether that path works, and every sample
+   it returns is dropped so nothing is counted twice.
+
+Why not only the orchestrator path, as before: it goes through the gateway and
+the load balancer, so each scrape lands on whichever pod answers. The counters
+of different pods end up in one series, and `rate()` reads every jump between
+them as a reset. After a load test that showed 271 requests a second with no
+traffic at all. One series per pod has no such problem.
+
+Every series it sends carries `collector="eks"`.
+
+### Deploying it
 
 ```bash
-cd observability
-cp prometheus.example.yml prometheus.yml   # fill in the placeholders
-docker compose up -d
+cp deploy/prometheus.example.yaml deploy/prometheus.yaml   # fill in the placeholders
+kubectl create secret generic grafana-cloud-prometheus -n inventory \
+  --from-file=token=observability/grafana-cloud-token
+kubectl apply -f deploy/prometheus.yaml
 ```
 
-`prometheus.yml` is git-ignored: it holds the orchestrator's address and this
-API's Grafana Cloud instance. The Grafana Cloud token goes in a separate file,
-`grafana-cloud-token`, also ignored — write it as plain UTF-8. PowerShell's
-`echo ... >` writes UTF-16, which turns the password into bytes Grafana Cloud
+`deploy/prometheus.yaml` is git-ignored: it names the orchestrator's address and
+this API's Grafana Cloud instance. The token file is git-ignored too, and must
+be plain UTF-8: PowerShell's `echo ... >` writes UTF-16, which Grafana Cloud
 rejects with a 401 that never says why.
 
-| | |
-|---|---|
-| Grafana | http://localhost:3001 — `admin` / `admin` |
-| Prometheus | http://localhost:9090 |
+### Looking at what it scrapes
 
-Nothing to click afterwards: the data source and the dashboard are both
-provisioned from files, and Grafana opens straight on the dashboard.
+Agent mode has no query page, but the target list works:
 
-## What it scrapes, and why through the orchestrator
+```bash
+kubectl port-forward -n inventory svc/prometheus 9090:9090
+# then open http://localhost:9090/targets
+```
 
-The API sits behind API Gateway and demands an API key on every call.
-Prometheus has no clean way to send one, and handing our key to another team's
-tooling is worse. The orchestrator holds the key and republishes one clean
-path per API, so `prometheus.yml` points at `/metrics/inventory` there.
+Three targets, all UP: two API pods (more under load) and the orchestrator.
 
-That path answers without a key. Convenient, and worth saying out loud: route
-names and traffic volumes are readable by anyone who finds the address. It
-carries no business data, which is why it is an acceptable trade for a demo
-and not for production.
+## The local stack
 
-The orchestrator serves plain HTTP on a bare IP, hence `scheme: http`. If it
-ever moves, change the host in `prometheus.yml` — **host only**: no scheme, no
-path, no trailing slash. A URL there is the single most common reason the
-target shows up DOWN.
-
-## Check the target before trusting a panel
-
-Open http://localhost:9090/targets. It must be **UP**. If it is DOWN, the error
-on that page says why, and it is almost always one of:
-
-| Error | Cause |
-|---|---|
-| `server returned HTTP status 403` | The orchestrator is not sending the API key, or its key is not on the usage plan |
-| `invalid metric type` / parse error | The orchestrator is wrapping the response in JSON. It must pass the body through as `text/plain` |
-| `context deadline exceeded` | The orchestrator is slow or asleep |
-| `no such host` | The hostname in `prometheus.yml` has a scheme or a path in it |
+`docker-compose.yml` still raises a Prometheus and a Grafana on this machine,
+for looking only. It sends nothing to Grafana Cloud: two Prometheus instances
+writing the same metrics would double every rate on the dashboard.
 
 ## The dashboard
 
-`dashboards/inventory.json`, eight panels:
+`dashboards/inventory.grafana-cloud.json`, twelve panels:
 
-| Panel | Query |
-|---|---|
-| **Cross-cloud calls** | `sum by (outcome) (rate(partner_lookups_total[5m]))` |
-| Scrape target | `up{job="inventory-api"}` |
-| Requests per second | `sum(rate(http_requests_total[5m]))` |
-| By status code | `sum by (status) (rate(http_requests_total[5m]))` |
-| p95 latency | `histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))` |
-| Busiest routes | `topk(5, sum by (route) (rate(http_requests_total[5m])))` |
-| Cache hit ratio | `rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))` |
-| Process memory | `process_resident_memory_bytes` |
+| Panel                         | Source                                                                 |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| **Cross-cloud calls**         | `sum by (outcome) (rate(partner_lookups_total[5m]))`                   |
+| Orchestrator path             | `up{job="inventory-api"}`                                              |
+| **Pods serving**              | `count(up{job="inventory-api-pods"} == 1)` — watch the autoscaler here |
+| Request rate by endpoint      | `sum by (route) (rate(http_requests_total[5m]))`                       |
+| Error rate by endpoint        | 4xx and 5xx over the total, by route                                   |
+| p50 / p95 latency by endpoint | `histogram_quantile` over `http_request_duration_seconds_bucket`       |
+| By status code                | `sum by (status) (...)`                                                |
+| Cache hit ratio               | hits over hits plus misses, summed across pods                         |
+| Process memory                | one line per pod                                                       |
+| Recent traces                 | Tempo                                                                  |
+| Logs for one correlation id   | CloudWatch Logs                                                        |
 
-Cross-cloud calls is first and widest on purpose: it is the one panel that
-shows, in a single picture, that the two clouds are talking and how often it
-works.
-
-Panels edited in the browser are not written back to the JSON. To keep a
-change, export it from Grafana and overwrite the file.
-
-## Two honest caveats about the numbers
-
-**The counters come from two replicas behind a load balancer**, and each scrape
-lands on whichever one answers. They therefore jump between pods instead of
-summing across them, and a rate over them is indicative, not exact. A real
-setup has Prometheus discover and scrape each pod directly; going through a
-load balancer is the trade taken here so the other team can read the metrics
-without credentials into the cluster.
-
-**Restarting a pod resets its counters to zero.** `rate()` copes with that, but
-a raw counter graph will show a cliff that is not a traffic drop.
+The `route` label is the route pattern, never the resolved URL, so item ids
+cannot multiply the time series.
