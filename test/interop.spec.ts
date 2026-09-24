@@ -318,6 +318,28 @@ describe('A step of the cross-cloud flow', () => {
     expect(body.code).toBe('NO_RECORDS');
   });
 
+  it('adds the item it is asked for, so a change to it shows up in the message', async () => {
+    await api
+      .post('/items')
+      .send({ groupId: 1, name: 'Cable', sku: 'C1', quantity: 9 })
+      .expect(201);
+
+    const before = await api.post('/v2/interop/messages?itemId=2').send({}).expect(201);
+    expect(before.body.entities[0]).toMatchObject({ id: '2', label: 'Cable' });
+
+    await api.patch('/v2/items/2').send({ name: 'Cable renamed live' }).expect(200);
+
+    const after = await api.post('/v2/interop/messages?itemId=2').send({}).expect(201);
+    expect(after.body.entities[0]).toMatchObject({ id: '2', label: 'Cable renamed live' });
+  });
+
+  it('404s on an item that does not exist, and 400s on one that is not a number', async () => {
+    expect((await api.post('/v2/interop/messages?itemId=999').send({}).expect(404)).body.code).toBe(
+      'NO_RECORDS',
+    );
+    await api.post('/v2/interop/messages?itemId=abc').send({}).expect(400);
+  });
+
   it('also answers under /api/v2', async () => {
     await api.post('/api/v2/interop/messages').send(upstream).expect(201);
   });
