@@ -330,7 +330,9 @@ the load balancer stops sending it new work before the socket closes.
 `deploy/hpa.yaml` adds horizontal autoscaling on CPU, from 2 replicas to 6.
 The floor stays at 2 on purpose: an autoscaler allowed to reach one replica
 would quietly undo the redundancy it was added to protect. It needs
-metrics-server, which EKS Auto Mode does not ship.
+metrics-server, which EKS Auto Mode does not ship. `deploy/load-test.yaml` is a four-minute burst from inside
+the cluster to watch it happen: measured, two replicas become six in under a
+minute, and go back to two five minutes after the load stops.
 
 In production the application logs one JSON object per line and publishes a
 cache hit-ratio metric in CloudWatch Embedded Metric Format — written to stdout,
