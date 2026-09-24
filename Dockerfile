@@ -17,8 +17,7 @@ COPY package.json ./
 USER node
 EXPOSE 3000
 
-# 127.0.0.1 and not localhost: inside the container localhost resolves to ::1,
-# where nothing is listening.
+# 127.0.0.1: localhost resolves to ::1 here, where nothing listens.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
   CMD wget -qO- http://127.0.0.1:${PORT:-3000}/health || exit 1
 

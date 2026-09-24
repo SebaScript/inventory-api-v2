@@ -1,18 +1,7 @@
-# Prometheus + Grafana for the inventory API, run locally, for looking only.
-#
-# The Prometheus that feeds Grafana Cloud lives in the cluster
-# (deploy/prometheus.example.yaml). This one sends nothing anywhere.
-#
-#   cd observability
-#   docker compose up -d
-#
-#   Grafana     http://localhost:3001   (admin / admin)
-#   Prometheus  http://localhost:9090   (check /targets first)
-#
-# Port 3001 on purpose: 3000 is where the API itself runs locally.
-#
-# Both the data source and the dashboard are provisioned from files, so there
-# is nothing to click after starting: the panels are already there.
+# Local Prometheus + Grafana, for looking only (`docker compose up -d`).
+#   Grafana     http://localhost:3001  (admin / admin; 3000 is the API)
+#   Prometheus  http://localhost:9090  (check /targets first)
+# Data source and dashboard are provisioned from files: nothing to click.
 
 services:
   prometheus:
@@ -31,9 +20,7 @@ services:
       - '3001:3000'
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
-      # Skips the "add your first data source" wizard: it is wired below.
       GF_AUTH_ANONYMOUS_ENABLED: 'false'
-      # Opens straight on the dashboard instead of the welcome page.
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/inventory/inventory.json
     volumes:
       - ./grafana-datasource.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro

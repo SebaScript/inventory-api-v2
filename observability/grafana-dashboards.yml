@@ -1,8 +1,3 @@
-# Tells Grafana to load every dashboard JSON found in the mounted folder, so
-# the panels exist on first start instead of being built by hand.
-#
-# `foldersFromFilesStructure` is off: one flat folder is enough here.
-
 apiVersion: 1
 
 providers:

@@ -1,17 +1,5 @@
-# Prometheus for the inventory API.
-#
-# Copy to prometheus.yml and fill in the three placeholders. prometheus.yml is
-# ignored by git: it names the orchestrator's address and this API's Grafana
-# Cloud instance, neither of which belongs in a public repository.
-#
-# It scrapes THROUGH the orchestrator, not the API directly. The API sits behind
-# API Gateway and requires an API key on every call; Prometheus has no clean way
-# to send one, and handing our key to another team's tooling is worse. The
-# orchestrator holds the key and exposes one clean path per API.
-#
-# The orchestrator answers on a bare IP with no certificate, so the scheme is
-# `http`. Anything sent to it, the orchestrator's own key included, travels in
-# clear text. Acceptable for a demo, not for anything else.
+# Local Prometheus, for looking only. Copy to prometheus.yml (git-ignored).
+# Scrapes through the orchestrator, which holds the API key. Plain http: it has no TLS.
 
 global:
   scrape_interval: 15s
@@ -27,8 +15,4 @@ scrape_configs:
           api: inventory
           cloud: aws
 
-# Sending to Grafana Cloud is NOT done from here any more: that Prometheus runs
-# inside the cluster (deploy/prometheus.example.yaml), all the time. This local
-# stack is only for looking at the metrics on this machine, and it must not
-# remote_write as well, or Grafana Cloud would receive every sample twice and
-# every rate on the dashboard would double.
+# No remote_write: the in-cluster Prometheus feeds Grafana Cloud; two would double every rate.

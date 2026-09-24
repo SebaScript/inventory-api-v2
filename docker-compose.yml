@@ -6,11 +6,10 @@ services:
       POSTGRES_USER: ${DB_USER:-inventory}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-inventory}
       POSTGRES_DB: ${DB_NAME:-inventory}
-    # 5433 on the host: 5432 is usually taken by a locally installed PostgreSQL.
+    # 5433: 5432 is usually taken by a local PostgreSQL.
     ports:
       - '${DB_PORT:-5433}:5432'
-    # Postgres 18 puts its cluster in /var/lib/postgresql, not in the /data
-    # subdirectory earlier versions used.
+    # Postgres 18 keeps its data here, not in /data.
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:

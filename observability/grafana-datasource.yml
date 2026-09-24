@@ -1,12 +1,4 @@
-# Wires Grafana to Prometheus automatically, so there is no clicking through
-# the "add a data source" wizard.
-#
-# The url is `http://prometheus:9090`, the service name from docker-compose.
-# `localhost` does NOT work here: inside the Grafana container that means
-# Grafana itself.
-#
-# The uid is pinned because the provisioned dashboard refers to it by name.
-# Without it Grafana invents a random one and every panel loads empty.
+# Pinned uid: the dashboard refers to it; a random one leaves every panel empty.
 
 apiVersion: 1
 
