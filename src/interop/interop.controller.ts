@@ -7,9 +7,11 @@ import {
   Headers,
   HttpCode,
   NotFoundException,
+  ParseIntPipe,
   Post,
+  Query,
 } from '@nestjs/common';
-import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CORRELATION_HEADER } from '../common/correlation';
 import { FlowMessage, InteropRecord } from './interop.contract';
 import { InteropService } from './interop.service';
@@ -55,12 +57,19 @@ export class InteropV2Controller {
       'message comes back as it arrived.',
   })
   @ApiBody({ schema: { type: 'object', example: { correlationId: '3f2c9a1e', entities: [] } } })
+  @ApiQuery({
+    name: 'itemId',
+    required: false,
+    description:
+      'Add this item instead of a random active one, so a change to it shows up in the message',
+  })
   @ApiResponse({ status: 201, type: FlowMessage })
   @ApiResponse({ status: 400, description: 'The body is not a JSON object' })
-  @ApiResponse({ status: 404, description: 'There is no active item to add' })
+  @ApiResponse({ status: 404, description: 'There is no item to add' })
   async step(
     @Body() message: unknown,
     @Headers(CORRELATION_HEADER) correlationId?: string,
+    @Query('itemId', new ParseIntPipe({ optional: true })) itemId?: number,
   ): Promise<FlowMessage> {
     if (message === null || typeof message !== 'object' || Array.isArray(message)) {
       throw new BadRequestException({
@@ -72,11 +81,15 @@ export class InteropV2Controller {
     const result = await this.service.appendToMessage(
       message as Record<string, unknown>,
       correlationId,
+      itemId,
     );
     if (!result) {
       throw new NotFoundException({
         code: 'NO_RECORDS',
-        message: 'There are no active items to add to the message',
+        message:
+          itemId === undefined
+            ? 'There are no active items to add to the message'
+            : `Item ${itemId} does not exist`,
       });
     }
     return result;

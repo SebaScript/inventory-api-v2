@@ -57,21 +57,17 @@ export class InteropService {
       .limit(1)
       .getOne();
 
-    if (!item) return null;
+    return item ? toRecord(item) : null;
+  }
 
-    return {
-      source: SERVICE_NAME,
-      kind: 'item',
-      id: String(item.id),
-      label: item.name,
-      attributes: {
-        sku: item.sku,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        group: item.group?.name ?? null,
-      },
-      retrievedAt: new Date().toISOString(),
-    };
+  /**
+   * A chosen item rather than a random one, in the same shape. Active or not:
+   * whoever names the item is asking for that one, and a discontinued item is
+   * still a real record.
+   */
+  async localRecord(id: number): Promise<InteropRecord | null> {
+    const item = await this.items.findOne({ where: { id }, relations: { group: true } });
+    return item ? toRecord(item) : null;
   }
 
   /**
@@ -146,8 +142,12 @@ export class InteropService {
   async appendToMessage(
     message: Record<string, unknown>,
     correlationId?: string,
+    itemId?: number,
   ): Promise<FlowMessage | null> {
-    const record = await this.randomLocalRecord();
+    // A chosen item makes the step repeatable: change that item, send the
+    // message again, and the change is in it. A random one cannot show that.
+    const record =
+      itemId === undefined ? await this.randomLocalRecord() : await this.localRecord(itemId);
     if (!record) return null;
 
     const entities = Array.isArray(message.entities) ? message.entities : [];
@@ -202,4 +202,21 @@ function safeSegment(value: string): string {
     .replace(/[.]{2,}/g, '_')
     .replace(/^[.]/, '_')
     .slice(0, 128);
+}
+
+/** The one mapping from an Item to the shape both clouds agreed on. */
+function toRecord(item: Item): InteropRecord {
+  return {
+    source: SERVICE_NAME,
+    kind: 'item',
+    id: String(item.id),
+    label: item.name,
+    attributes: {
+      sku: item.sku,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      group: item.group?.name ?? null,
+    },
+    retrievedAt: new Date().toISOString(),
+  };
 }
