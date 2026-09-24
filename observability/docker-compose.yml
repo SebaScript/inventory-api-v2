@@ -1,4 +1,7 @@
-# Prometheus + Grafana for the inventory API, run locally.
+# Prometheus + Grafana for the inventory API, run locally, for looking only.
+#
+# The Prometheus that feeds Grafana Cloud lives in the cluster
+# (deploy/prometheus.example.yaml). This one sends nothing anywhere.
 #
 #   cd observability
 #   docker compose up -d
@@ -19,9 +22,6 @@ services:
       - '9090:9090'
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      # Create this file before starting: Docker turns a missing bind source
-      # into a directory, and Prometheus then fails with a confusing error.
-      - ./grafana-cloud-token:/etc/prometheus/grafana-cloud-token:ro
     restart: unless-stopped
 
   grafana:

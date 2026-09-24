@@ -27,17 +27,8 @@ scrape_configs:
           api: inventory
           cloud: aws
 
-# Ship every sample to this API's own Grafana Cloud stack as well.
-#
-# Grafana Cloud cannot scrape the orchestrator itself: its agentless
-# "Metrics Endpoint" only accepts HTTPS urls with Basic or Bearer auth, and the
-# orchestrator serves plain HTTP with none. So this Prometheus scrapes it and
-# pushes the samples on.
-#
-# The token lives in `observability/grafana-cloud-token`, which is git-ignored.
-# This file is committed, so it must never hold the token itself.
-remote_write:
-  - url: https://YOUR-GRAFANA-CLOUD-PROMETHEUS/api/prom/push
-    basic_auth:
-      username: 'YOUR_INSTANCE_ID'
-      password_file: /etc/prometheus/grafana-cloud-token
+# Sending to Grafana Cloud is NOT done from here any more: that Prometheus runs
+# inside the cluster (deploy/prometheus.example.yaml), all the time. This local
+# stack is only for looking at the metrics on this machine, and it must not
+# remote_write as well, or Grafana Cloud would receive every sample twice and
+# every rate on the dashboard would double.
