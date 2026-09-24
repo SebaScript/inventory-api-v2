@@ -1,0 +1,48 @@
+# A short burst of load from inside the cluster, to watch the autoscaler work.
+#
+#   kubectl apply -f deploy/load-test.yaml          start (runs for 4 minutes)
+#   kubectl get hpa -n inventory -w                 watch the replicas climb
+#   kubectl delete -f deploy/load-test.yaml         stop early
+#
+# From inside the cluster on purpose: API Gateway throttles each key to 10
+# requests a second, which is far too little to move the CPU of two replicas.
+# Calling the Service directly skips the gateway, and nothing outside the
+# cluster can do the same because the load balancer is internal.
+#
+# Measured: CPU goes from ~7 % to ~370 % of the request within a minute and the
+# deployment reaches 6 replicas. Scaling back down waits five minutes after the
+# load stops, as set in hpa.yaml.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: load-test
+  namespace: inventory
+spec:
+  backoffLimit: 0
+  # Removed a minute after it finishes, so running it twice needs no cleanup.
+  ttlSecondsAfterFinished: 60
+  template:
+    metadata:
+      labels:
+        app: load-test
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: load
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              for i in $(seq 1 24); do
+                (while true; do
+                  wget -q -O /dev/null "http://inventory-api.inventory/v2/items?limit=50"
+                done) &
+              done
+              sleep 240
+          resources:
+            requests:
+              cpu: 100m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
