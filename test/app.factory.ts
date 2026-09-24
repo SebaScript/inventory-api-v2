@@ -18,11 +18,8 @@ export async function createApp(
   api: ReturnType<typeof request>;
 }> {
   const builder = Test.createTestingModule({ imports: [AppModule] });
-  // Without an override the real CacheService runs with no REDIS_URL, which is
-  // the disabled path every other spec exercises.
+  // No override: real services with no REDIS_URL or S3_BUCKET, their offline paths.
   if (cache) builder.overrideProvider(CacheService).useValue(cache);
-  // Same idea for the bucket: without an override there is no S3_BUCKET and
-  // every storage path takes its offline branch.
   if (storage) builder.overrideProvider(ObjectStorageService).useValue(storage);
 
   const moduleRef = await builder.compile();

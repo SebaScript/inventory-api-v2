@@ -53,7 +53,7 @@ describe('Metrics endpoint', () => {
     expect(res.text).toContain('http_requests_total');
     expect(res.text).toContain('http_request_duration_seconds');
     expect(res.text).toContain('cache_hits_total');
-    // Default process metrics, which is what most Grafana dashboards start from.
+    // Default process metrics.
     expect(res.text).toContain('process_resident_memory_bytes');
   });
 

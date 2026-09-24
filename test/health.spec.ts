@@ -15,8 +15,7 @@ describe('Health probes', () => {
   it('answers liveness without the database, so a database blip cannot restart the pod', async () => {
     const spy = jest.spyOn(dataSource, 'query').mockRejectedValue(new Error('down'));
 
-    // This is the whole argument for splitting the probes: the process is
-    // healthy, it just cannot serve.
+    // Why the probes are split: alive, but unable to serve.
     expect((await api.get('/health/live').expect(200)).body).toEqual({ status: 'ok' });
     await api.get('/health/ready').expect(503);
     await api.get('/health').expect(503);

@@ -66,8 +66,7 @@ describe('Exports', () => {
   afterAll(() => app.close());
 
   it('refuses clearly when object storage is not configured', async () => {
-    // No S3_BUCKET in the test environment, so this is the real offline
-    // contract rather than a mocked AWS client.
+    // No S3_BUCKET in tests: the real offline path, not a mock.
     const res = await api.post('/v2/exports/items').expect(503);
     expect(res.body.code).toBe('EXPORT_UNAVAILABLE');
   });

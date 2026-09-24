@@ -9,10 +9,7 @@ import { createApp, reset } from './app.factory';
 const dto = (over: Partial<FindItemsDto> = {}): FindItemsDto =>
   ({ page: 1, limit: 20, ...over }) as FindItemsDto;
 
-/**
- * A plain object, deliberately not a Proxy: a proxy that answers every property
- * also answers `then`, which makes it thenable and hangs the suite with no error.
- */
+/** Not a Proxy: a proxy also answers `then` and silently hangs the suite. */
 class FakeCache {
   private readonly store = new Map<string, { e: string; d: unknown }>();
   private readonly epochs = new Map<string, number>();
@@ -28,8 +25,7 @@ class FakeCache {
   }
 
   write(namespace: string, key: string, epoch: string, value: unknown): Promise<void> {
-    // Round-trips through JSON exactly like the real client, so the test sees
-    // the same shape a cache hit would really return.
+    // Through JSON, like the real client.
     this.store.set(`${namespace}:${key}`, { e: epoch, d: JSON.parse(JSON.stringify(value)) });
     return Promise.resolve();
   }

@@ -46,8 +46,7 @@ describe('API v2', () => {
 
     // Same record, same source of truth.
     expect(v2).toEqual(v1);
-    // And the divergence the version exists for: v2 reaches the other cloud,
-    // the unversioned API deliberately does not.
+    // The divergence: only v2 reaches the other cloud.
     expect(partner).toEqual({ status: 'disabled', record: null });
     expect(v1).not.toHaveProperty('partner');
   });

@@ -93,8 +93,7 @@ describe('Interop with the other cloud', () => {
     expect(body.paths['/v2/items/{id}'].get.summary).toContain('other cloud');
   });
 });
-/** Same shape as the real service, minus the network. Not a Proxy: a proxy that
- * answers every property also answers `then`, which hangs the suite silently. */
+/** Not a Proxy: a proxy also answers `then` and silently hangs the suite. */
 class FakeCache {
   private readonly store = new Map<string, { e: string; d: unknown }>();
   private readonly epochs = new Map<string, number>();
