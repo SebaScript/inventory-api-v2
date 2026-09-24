@@ -1,5 +1,4 @@
-# Copy to config.yaml, fill in the real values and apply. config.yaml is ignored
-# by git: the Secret below holds a database password.
+# Copy to config.yaml (git-ignored: it holds credentials), fill in, apply.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,15 +7,13 @@ metadata:
 data:
   NODE_ENV: production
   PORT: '3000'
-  # Managed PostgreSQL refuses plaintext connections.
+  # RDS requires TLS.
   DB_SSL: 'true'
-  # Off after the first rollout has created the schema: two replicas building it
-  # at the same time race each other.
+  # The seed Job builds the schema; replicas doing it at once would race.
   DB_SYNC: 'false'
   AWS_REGION: us-east-1
   S3_BUCKET: REPLACE_WITH_YOUR_BUCKET
-  # The other cloud. Leave both empty until the orchestrator exists: the API
-  # then reports the partner lookup as `disabled` and works exactly as before.
+  # Empty: no cross-cloud lookups, `partner` reports `disabled`.
   ORCHESTRATOR_URL: ''
   PARTNER_KEY: ''
   INTEROP_TIMEOUT_MS: '1500'
@@ -28,13 +25,8 @@ metadata:
   namespace: inventory
 type: Opaque
 stringData:
-  # No `sslmode` in this URL. node-postgres merges the connection string over
-  # the driver options, so an sslmode here would silently override DB_SSL and
-  # the pod would fail to start against a managed database.
+  # No `sslmode` here: it would override DB_SSL.
   DATABASE_URL: postgres://USER:PASSWORD@YOUR-DB-ENDPOINT:5432/inventory
-  # Leave empty to run with the cache disabled: the API still works, it just
-  # reads the database every time.
+  # Empty: no cache, every read goes to the database.
   REDIS_URL: redis://YOUR-CACHE-ENDPOINT:6379
-  # Only if the orchestrator requires a key. Lives in the Secret, not the
-  # ConfigMap, because it is a credential.
   ORCHESTRATOR_API_KEY: ''

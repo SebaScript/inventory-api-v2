@@ -1,18 +1,5 @@
-# Keeps at least one replica serving while the cluster moves pods around.
-#
-#   kubectl apply -f deploy/pdb.yaml
-#
-# EKS Auto Mode consolidates underutilised nodes on its own, every few minutes
-# if it finds a saving, and nothing stops it from evicting both replicas at
-# once when they share a node. Without this budget that is exactly what
-# happened: for a few seconds no pod was left, and API Gateway answered 5xx
-# while the pods themselves logged nothing, because no request reached them.
-#
-# With it, voluntary evictions — consolidation, node upgrades, drains — go one
-# pod at a time, and the second waits until the first has been rescheduled and
-# passed its readiness probe. It does not protect against a node crashing,
-# which is not voluntary; spreading replicas across nodes would, at the cost of
-# a second node.
+# Voluntary evictions (node consolidation, upgrades) move one pod at a time,
+# so there is always one replica serving.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

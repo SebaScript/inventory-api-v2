@@ -1,16 +1,5 @@
-# Copy to seed-job.yaml, replace the image, and apply that copy.
-# seed-job.yaml is ignored by git, same reason as deployment.yaml.
-#
-# Run once, BEFORE the Deployment, and only once.
-#   kubectl apply -f deploy/seed-job.yaml
-#   kubectl wait --for=condition=complete job/inventory-seed -n inventory --timeout=300s
-#
-# Order matters: this job runs with DB_SYNC=true and is what creates the schema
-# from the entities. The Deployment runs with DB_SYNC=false, because two
-# replicas building the schema at the same time race each other.
-#
-# The application refuses to seed on boot in production, which is deliberate:
-# filling a database is an explicit operation, not a side effect of starting.
+# Copy to seed-job.yaml (git-ignored), set the image. Run once, BEFORE the Deployment:
+# it creates the schema and the demo data, so the replicas never race to do it.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -32,7 +21,5 @@ spec:
             - secretRef:
                 name: inventory-api
           env:
-            # The very first run also has to create the schema, since the
-            # Deployment runs with synchronisation turned off.
             - name: DB_SYNC
               value: 'true'

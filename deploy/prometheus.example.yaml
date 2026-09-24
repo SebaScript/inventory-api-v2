@@ -1,23 +1,8 @@
-# Prometheus, inside the cluster, shipping this API's metrics to its own
-# Grafana Cloud stack.
-#
-# Copy to prometheus.yaml, fill in the three placeholders and apply that copy.
-# prometheus.yaml is ignored by git: it names the orchestrator's address and
-# this API's Grafana Cloud instance.
-#
+# Prometheus in agent mode: scrapes each API pod and forwards to Grafana Cloud.
+# Keeps no data itself. Copy to prometheus.yaml (git-ignored), fill in, then:
 #   kubectl create secret generic grafana-cloud-prometheus -n inventory \
 #     --from-file=token=observability/grafana-cloud-token
 #   kubectl apply -f deploy/prometheus.yaml
-#
-# Why it lives here and not on a laptop: Grafana Cloud cannot scrape the
-# orchestrator itself (its agentless scraper wants HTTPS with credentials, and
-# the orchestrator serves plain HTTP with none), so something has to scrape and
-# forward. On a laptop, closing the lid stops the metrics. Here it runs next to
-# the API, all the time.
-#
-# Agent mode: Prometheus only scrapes and forwards. No local database to query,
-# no volume to keep, a fraction of the memory. Everything is read in Grafana
-# Cloud, so a local copy would be dead weight.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -28,18 +13,12 @@ data:
     global:
       scrape_interval: 15s
       scrape_timeout: 10s
-      # Stamped on every series this instance sends, so Grafana Cloud can tell
-      # it apart from any other Prometheus writing the same metrics.
       external_labels:
         collector: eks
 
     scrape_configs:
-      # The metrics themselves: every API pod, found through the Kubernetes API
-      # and read directly. Going through the load balancer instead lands each
-      # scrape on whichever pod answers, the counters of different pods get
-      # mixed into one series, and rate() reads every jump back as a reset:
-      # after a load test it showed 271 requests a second with no traffic at
-      # all. One series per pod has none of that, and follows the autoscaler.
+      # Every API pod, read directly. Through the load balancer, the pods'
+      # counters mixed into one series and rates came out wrong.
       - job_name: inventory-api-pods
         metrics_path: /metrics
         kubernetes_sd_configs:
@@ -60,9 +39,7 @@ data:
           - target_label: cloud
             replacement: aws
 
-      # The path the other cloud reads, kept only as a health check: `up` says
-      # whether the orchestrator is serving these metrics. Every sample it
-      # returns is dropped, or each request would be counted twice.
+      # The orchestrator path, as a health check only: samples are dropped.
       - job_name: inventory-api
         metrics_path: /metrics/inventory
         scheme: http
@@ -82,8 +59,7 @@ data:
           username: 'YOUR_NUMERIC_INSTANCE_ID'
           password_file: /etc/grafana-cloud/token
 ---
-# Pod discovery reads the Kubernetes API: list and watch pods in this
-# namespace, nothing else and nowhere else.
+# Pod discovery: list pods in this namespace, nothing else.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -120,8 +96,7 @@ metadata:
   name: prometheus
   namespace: inventory
 spec:
-  # One on purpose: two would scrape the same target and send every sample
-  # twice, which Grafana Cloud rejects as duplicates.
+  # One: two would send every sample twice.
   replicas: 1
   selector:
     matchLabels:
@@ -131,14 +106,11 @@ spec:
       labels:
         app: prometheus
       annotations:
-        # A node consolidation would leave a gap in every graph. Same reason
-        # as the API's own deployment.
         karpenter.sh/do-not-disrupt: 'true'
     spec:
       serviceAccountName: prometheus
       containers:
         - name: prometheus
-          # Pinned: the version already proven against this Grafana Cloud stack.
           image: prom/prometheus:v3.14.0
           args:
             - --config.file=/etc/prometheus/prometheus.yml
@@ -165,9 +137,7 @@ spec:
             - name: grafana-cloud
               mountPath: /etc/grafana-cloud
               readOnly: true
-            # The agent's write-ahead log: samples wait here if Grafana Cloud
-            # is briefly unreachable. Losing it on a restart only loses what
-            # had not been sent yet.
+            # Buffers samples while Grafana Cloud is unreachable.
             - name: wal
               mountPath: /prometheus
       volumes:
@@ -180,8 +150,7 @@ spec:
         - name: wal
           emptyDir: {}
 ---
-# Only for `kubectl port-forward`, to look at the scrape status. Not exposed
-# outside the cluster.
+# For `kubectl port-forward` only: see /targets.
 apiVersion: v1
 kind: Service
 metadata:

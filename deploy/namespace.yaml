@@ -3,8 +3,7 @@ kind: Namespace
 metadata:
   name: inventory
 ---
-# The pod's AWS identity. EKS Pod Identity binds this account to an IAM role, so
-# the container never carries a key or a secret of its own.
+# Bound to an IAM role by EKS Pod Identity: S3 access with no AWS keys.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

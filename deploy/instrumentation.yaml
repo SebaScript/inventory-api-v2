@@ -1,47 +1,22 @@
-# OpenTelemetry auto-instrumentation for the API, through CloudWatch
-# Application Signals.
-#
-#   kubectl apply -f deploy/instrumentation.yaml
-#
-# The amazon-cloudwatch-observability add-on ships the operator, the webhook and
-# an agent already configured to receive Application Signals, but it creates no
-# Instrumentation resource: without one the webhook has nothing to inject and
-# every pod starts uninstrumented, silently.
-#
-# The application itself is not touched. The operator adds an init container
-# that copies the SDK into a shared volume and sets NODE_OPTIONS so Node loads
-# it at startup, which is why there is no OpenTelemetry dependency in
-# package.json and nothing to maintain in the code.
-#
-# Traces reach the agent over the cluster service the add-on already publishes:
-# 4315 is gRPC, 4316 is HTTP, 2000 is the X-Ray daemon port.
+# OpenTelemetry auto-instrumentation: the add-on's operator injects the SDK into
+# the API pods (init container + NODE_OPTIONS). No code changes in the app.
+# Without this resource, nothing is injected.
 apiVersion: cloudwatch.aws.amazon.com/v1alpha1
 kind: Instrumentation
 metadata:
   name: inventory-api
   namespace: inventory
 spec:
-  # xray last but present: it is what lets a trace started here be stitched to
-  # the same request once it reaches API Gateway. tracecontext is the W3C
-  # standard the other cloud speaks.
+  # tracecontext: the W3C standard the other cloud speaks. xray: joins API Gateway.
   propagators:
     - tracecontext
     - baggage
     - xray
+  # X-Ray sampling rules decide, so /health* and /metrics* can be dropped by path.
   sampler:
-    # Sampling decided by X-Ray's own rules rather than a fixed rate here, so
-    # the kubelet's probes and Prometheus' scrape can be dropped by path. They
-    # were 85 % of every trace recorded: noise that costs money and buries the
-    # requests worth looking at. The rules live in X-Ray:
-    #   drop-health-probes   /health*    rate 0
-    #   drop-metrics-scrape  /metrics*   rate 0
-    # Port 2000 is the X-Ray endpoint the add-on already publishes on the agent.
     type: xray
     argument: endpoint=http://cloudwatch-agent.amazon-cloudwatch:2000
   nodejs:
-    # The image is left out so the operator uses the version it was built
-    # against. Pinning one here is how you end up with an SDK the agent no
-    # longer understands after an add-on upgrade.
     env:
       - name: OTEL_AWS_APPLICATION_SIGNALS_ENABLED
         value: 'true'
@@ -49,10 +24,7 @@ spec:
         value: http/protobuf
       - name: OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT
         value: http://cloudwatch-agent.amazon-cloudwatch:4316/v1/metrics
-      # Traces go to the collector in deploy/otel-collector.yaml, which forwards
-      # each one to both the CloudWatch agent and Grafana Cloud. The metrics
-      # endpoint above still points straight at the agent: Application Signals
-      # metrics have one destination and need no fan-out.
+      # Traces go to the collector, which sends them to X-Ray and Grafana Cloud.
       - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
         value: http://otel-collector.inventory:4318/v1/traces
       - name: OTEL_TRACES_SAMPLER
