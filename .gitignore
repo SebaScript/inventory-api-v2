@@ -54,3 +54,8 @@ CLAUDE.local.md
 observability/grafana-cloud-token
 # The filled-in scrape config: the template is prometheus.example.yml
 observability/prometheus.yml
+
+# Terraform: provider cache and local state; the real state lives in S3
+.terraform/
+*.tfstate
+*.tfstate.*
