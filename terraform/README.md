@@ -47,30 +47,3 @@ terraform destroy
 
 Nothing is left behind except the small state bucket; remove it last with
 `aws s3 rb s3://inventory-api-tfstate-<account-id> --force`.
-
-## Run it from your machine
-
-Requires Terraform 1.11+, Docker and the AWS CLI with credentials.
-
-```bash
-cd terraform
-BUCKET="inventory-api-tfstate-$(aws sts get-caller-identity --query Account --output text)"
-aws s3 mb "s3://$BUCKET"                      # first time only
-terraform init -backend-config="bucket=$BUCKET"
-
-terraform apply -target=aws_ecr_repository.api
-REPO=$(terraform output -raw ecr_repository_url)
-aws ecr get-login-password | docker login --username AWS --password-stdin "${REPO%%/*}"
-docker build -t "$REPO:v1" .. && docker push "$REPO:v1"
-
-terraform apply -var="image_tag=v1"
-terraform output api_url                      # ready a couple of minutes later
-```
-
-The registry goes first because the machine pulls the image on its first boot.
-If the API never answers, *EC2 → the instance → Actions → Monitor and
-troubleshoot → Get system log* shows what the boot script printed.
-
-## Cost
-
-About 0.03 USD per hour while it exists. Destroy it when the demo is over.
