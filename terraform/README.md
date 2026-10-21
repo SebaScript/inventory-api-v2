@@ -1,32 +1,32 @@
 # Infrastructure with Terraform
 
-Everything the API needs on AWS, created and destroyed with one command: the
-network rules, a PostgreSQL database, the container registry, object storage,
-logs, a load balancer and the API itself running on ECS Fargate.
+Everything the API needs on AWS, created and destroyed with one command: a
+PostgreSQL database, the container registry, object storage, logs, and one
+virtual machine that runs the API with Docker.
 
 ```
-Internet ──► Application Load Balancer ──► ECS Fargate (the API) ──┬──► RDS PostgreSQL
-                                                 ▲                  ├──► S3 (exports)
-                                       image from ECR               └──► CloudWatch Logs
-                              DATABASE_URL from SSM Parameter Store
+Internet ──:80──► EC2 (Docker: the API) ──┬──► RDS PostgreSQL
+                     ▲                    ├──► S3 (exports)
+          image from ECR                  └──► CloudWatch Logs
+          DATABASE_URL from SSM Parameter Store
 ```
 
 ## What each file creates
 
-| File           | AWS service           | What it is for                                                          |
-| -------------- | --------------------- | ----------------------------------------------------------------------- |
-| `providers.tf` | —                     | Terraform and provider versions, and the state kept in S3               |
-| `variables.tf` | —                     | Region, name prefix and the image tag to deploy                         |
-| `network.tf`   | VPC, security groups  | The default VPC; only the load balancer reaches the API, only the API reaches the database |
-| `ecr.tf`       | ECR                   | The registry the API image is pushed to                                 |
-| `rds.tf`       | RDS                   | PostgreSQL 18, `db.t4g.micro`, private, with a generated password       |
-| `ssm.tf`       | SSM Parameter Store   | The database URL, encrypted, injected into the container at start       |
-| `s3.tf`        | S3                    | The bucket for CSV exports and flow messages                            |
-| `iam.tf`       | IAM                   | One role for ECS (image, logs, secret) and one for the API (its bucket) |
-| `logs.tf`      | CloudWatch Logs       | The API logs, kept 7 days                                               |
-| `alb.tf`       | Elastic Load Balancing | The public URL, with health checks on `/health/ready`                  |
-| `ecs.tf`       | ECS Fargate           | The cluster, the task definition and the service running the API        |
-| `outputs.tf`   | —                     | The API URL and the names the pipeline needs                            |
+| File           | AWS service          | What it is for                                                         |
+| -------------- | -------------------- | ---------------------------------------------------------------------- |
+| `providers.tf` | —                    | Terraform and provider versions, and the state kept in S3              |
+| `variables.tf` | —                    | Region, name prefix and the image tag to deploy                        |
+| `network.tf`   | VPC, security groups | The default VPC; port 80 open to the API, only the API reaches the database |
+| `ecr.tf`       | ECR                  | The registry the API image is pushed to                                |
+| `rds.tf`       | RDS                  | PostgreSQL 18, `db.t4g.micro`, private, encrypted, generated password  |
+| `ssm.tf`       | SSM Parameter Store  | The database URL, encrypted                                            |
+| `s3.tf`        | S3                   | The bucket for CSV exports and flow messages                           |
+| `iam.tf`       | IAM                  | The machine's role: pull the image, read the URL, its bucket, its logs |
+| `logs.tf`      | CloudWatch Logs      | The API logs, kept 7 days                                              |
+| `ec2.tf`       | EC2                  | A `t3.micro` with Amazon Linux 2023 that runs the API                  |
+| `user-data.sh` | —                    | What the machine does on first boot: install Docker, seed, start the API |
+| `outputs.tf`   | —                    | The API URL and the names the pipeline needs                           |
 
 ## Deploy from the pipeline
 
@@ -41,11 +41,11 @@ It then:
 
 1. creates the S3 bucket for the Terraform state, if it does not exist;
 2. creates the ECR repository, builds the API image and pushes it, tagged with the commit;
-3. applies everything else; the apply waits until the API is running and healthy;
-4. seeds the database with a one-off task;
-5. calls `/health/ready` and writes the API URL in the run summary.
+3. applies everything else; the machine boots, installs Docker, seeds the database and starts the API;
+4. waits for `/health/ready` and writes the API URL in the run summary.
 
-A first run takes about 10 minutes, most of it creating the database.
+A new commit means a new image, and a new image means a new machine: Terraform
+replaces it, so every deploy starts clean.
 
 ## Destroy
 
@@ -75,12 +75,15 @@ aws ecr get-login-password | docker login --username AWS --password-stdin "${REP
 docker build -t "$REPO:v1" .. && docker push "$REPO:v1"
 
 terraform apply -var="image_tag=v1"
-terraform output api_url
+terraform output api_url                      # ready a few minutes later
 ```
 
-The registry goes first because the service cannot start without an image in it.
+The registry goes first because the machine pulls the image on its first boot.
+
+To look inside the machine without SSH keys: *EC2 → the instance → Connect →
+Session Manager*, then `sudo docker logs api`.
 
 ## Cost
 
-About 0.07 USD per hour while it exists: Fargate, the load balancer and the
-database. Destroy it when the demo is over.
+About 0.03 USD per hour while it exists: the machine, the database and a public
+IPv4 address. Destroy it when the demo is over.
