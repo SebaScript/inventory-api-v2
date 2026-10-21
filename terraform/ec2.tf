@@ -13,11 +13,10 @@ resource "aws_instance" "api" {
   # A new image means a new machine: the script below only runs on first boot.
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data.sh", {
-    region    = var.region
-    image     = "${aws_ecr_repository.api.repository_url}:${var.image_tag}"
-    parameter = aws_ssm_parameter.database_url.name
-    bucket    = aws_s3_bucket.exports.bucket
-    log_group = aws_cloudwatch_log_group.api.name
+    region       = var.region
+    image        = "${aws_ecr_repository.api.repository_url}:${var.image_tag}"
+    database_url = "postgres://${aws_db_instance.main.username}:${random_password.db.result}@${aws_db_instance.main.endpoint}/${aws_db_instance.main.db_name}"
+    bucket       = aws_s3_bucket.exports.bucket
   })
 
   # Hop limit 2: the container is one network hop away and needs the role's credentials.
