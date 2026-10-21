@@ -15,6 +15,7 @@ resource "aws_db_instance" "main" {
   instance_class         = "db.t4g.micro"
   allocated_storage      = 20
   storage_type           = "gp3"
+  storage_encrypted      = true
   db_name                = "inventory"
   username               = "inventory"
   password               = random_password.db.result
