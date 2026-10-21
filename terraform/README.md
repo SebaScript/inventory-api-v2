@@ -1,32 +1,23 @@
 # Infrastructure with Terraform
 
-Everything the API needs on AWS, created and destroyed with one command: a
-PostgreSQL database, the container registry, object storage, logs, and one
-virtual machine that runs the API with Docker.
+Four AWS services, created and destroyed with one command:
+
+| File     | Service | What it is for                                                         |
+| -------- | ------- | ---------------------------------------------------------------------- |
+| `ec2.tf` | **EC2** | One machine that runs the API with Docker, with its firewall and role  |
+| `rds.tf` | **RDS** | The PostgreSQL database, private, reachable only from the machine      |
+| `ecr.tf` | **ECR** | The registry the pipeline pushes the API image to                      |
+| `s3.tf`  | **S3**  | The bucket where the API stores its CSV exports                        |
+
+`providers.tf`, `variables.tf` and `outputs.tf` hold the configuration, and
+`user-data.sh` is what the machine runs on its first boot: install Docker, seed
+the database, start the API on port 80.
 
 ```
 Internet ──:80──► EC2 (Docker: the API) ──┬──► RDS PostgreSQL
-                     ▲                    ├──► S3 (exports)
-          image from ECR                  └──► CloudWatch Logs
-          DATABASE_URL from SSM Parameter Store
+                     ▲                    └──► S3
+                image from ECR
 ```
-
-## What each file creates
-
-| File           | AWS service          | What it is for                                                         |
-| -------------- | -------------------- | ---------------------------------------------------------------------- |
-| `providers.tf` | —                    | Terraform and provider versions, and the state kept in S3              |
-| `variables.tf` | —                    | Region, name prefix and the image tag to deploy                        |
-| `network.tf`   | VPC, security groups | The default VPC; port 80 open to the API, only the API reaches the database |
-| `ecr.tf`       | ECR                  | The registry the API image is pushed to                                |
-| `rds.tf`       | RDS                  | PostgreSQL 18, `db.t4g.micro`, private, encrypted, generated password  |
-| `ssm.tf`       | SSM Parameter Store  | The database URL, encrypted                                            |
-| `s3.tf`        | S3                   | The bucket for CSV exports and flow messages                           |
-| `iam.tf`       | IAM                  | The machine's role: pull the image, read the URL, its bucket, its logs |
-| `logs.tf`      | CloudWatch Logs      | The API logs, kept 7 days                                              |
-| `ec2.tf`       | EC2                  | A `t3.micro` with Amazon Linux 2023 that runs the API                  |
-| `user-data.sh` | —                    | What the machine does on first boot: install Docker, seed, start the API |
-| `outputs.tf`   | —                    | The API URL and the names the pipeline needs                           |
 
 ## Deploy from the pipeline
 
@@ -44,8 +35,7 @@ It then:
 3. applies everything else; the machine boots, installs Docker, seeds the database and starts the API;
 4. waits for `/health/ready` and writes the API URL in the run summary.
 
-A new commit means a new image, and a new image means a new machine: Terraform
-replaces it, so every deploy starts clean.
+A new commit means a new image, and a new image means a new machine.
 
 ## Destroy
 
@@ -55,9 +45,8 @@ Run the same workflow with **destroy**. Or, from this folder:
 terraform destroy
 ```
 
-The bucket and the registry are emptied on the way out, and the database is
-dropped without a final snapshot, so nothing is left behind. Only the small state
-bucket stays; remove it last with `aws s3 rb s3://inventory-api-tfstate-<account-id> --force`.
+Nothing is left behind except the small state bucket; remove it last with
+`aws s3 rb s3://inventory-api-tfstate-<account-id> --force`.
 
 ## Run it from your machine
 
@@ -75,15 +64,13 @@ aws ecr get-login-password | docker login --username AWS --password-stdin "${REP
 docker build -t "$REPO:v1" .. && docker push "$REPO:v1"
 
 terraform apply -var="image_tag=v1"
-terraform output api_url                      # ready a few minutes later
+terraform output api_url                      # ready a couple of minutes later
 ```
 
 The registry goes first because the machine pulls the image on its first boot.
-
-To look inside the machine without SSH keys: *EC2 → the instance → Connect →
-Session Manager*, then `sudo docker logs api`.
+If the API never answers, *EC2 → the instance → Actions → Monitor and
+troubleshoot → Get system log* shows what the boot script printed.
 
 ## Cost
 
-About 0.03 USD per hour while it exists: the machine, the database and a public
-IPv4 address. Destroy it when the demo is over.
+About 0.03 USD per hour while it exists. Destroy it when the demo is over.
