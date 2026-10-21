@@ -232,9 +232,9 @@ runs with nothing but PostgreSQL.
 
 ## Infrastructure as code
 
-[`terraform/`](terraform/README.md) creates everything on AWS in one apply: RDS,
-ECR, S3, SSM, CloudWatch Logs and one EC2 machine that runs the API with Docker.
-The `Infrastructure` workflow deploys it, installs the API, and destroys it on demand.
+[`terraform/`](terraform/README.md) creates four AWS services in one apply: an EC2
+machine that runs the API with Docker, an RDS database, an ECR registry and an S3
+bucket. The `Infrastructure` workflow deploys it, installs the API, and destroys it on demand.
 
 ## Deploying to a cluster
 
