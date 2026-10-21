@@ -2,6 +2,12 @@ name: Infrastructure
 
 on:
   workflow_dispatch:
+    inputs:
+      action:
+        description: apply deploys the infrastructure and the API; destroy removes everything
+        type: choice
+        options: [apply, destroy]
+        default: apply
 
 permissions:
   contents: read
@@ -38,22 +44,30 @@ jobs:
       - name: Validate
         run: terraform fmt -check && terraform validate
 
+      - name: Destroy everything
+        if: inputs.action == 'destroy'
+        run: terraform destroy -auto-approve
 
       - name: Create the image registry
+        if: inputs.action == 'apply'
         run: terraform apply -auto-approve -target=aws_ecr_repository.api
 
       - uses: aws-actions/amazon-ecr-login@v2
+        if: inputs.action == 'apply'
 
       - name: Build and push the API image
+        if: inputs.action == 'apply'
         run: |
           IMAGE="$(terraform output -raw ecr_repository_url):$GITHUB_SHA"
           docker build -t "$IMAGE" ..
           docker push "$IMAGE"
 
       - name: Deploy the infrastructure and the API
+        if: inputs.action == 'apply'
         run: terraform apply -auto-approve -var="image_tag=$GITHUB_SHA"
 
       - name: Seed the database (one-off task, skipped if there is data)
+        if: inputs.action == 'apply'
         run: |
           CLUSTER=$(terraform output -raw cluster)
           SERVICE=$(terraform output -raw service)
@@ -68,6 +82,7 @@ jobs:
             --query 'tasks[0].containers[0].exitCode' --output text)" = 0
 
       - name: Smoke test
+        if: inputs.action == 'apply'
         run: |
           URL=$(terraform output -raw api_url)
           curl --fail --silent --show-error --retry 10 --retry-delay 10 --retry-all-errors "$URL/health/ready"
