@@ -3,9 +3,34 @@ resource "random_password" "db" {
   special = false # it goes inside a URL
 }
 
+# The default VPC's subnets in two zones: RDS requires at least two.
+data "aws_subnets" "default" {
+  filter {
+    name   = "default-for-az"
+    values = ["true"]
+  }
+
+  filter {
+    name   = "availability-zone"
+    values = ["${var.region}a", "${var.region}b"]
+  }
+}
+
 resource "aws_db_subnet_group" "main" {
   name       = var.project
   subnet_ids = data.aws_subnets.default.ids
+}
+
+# Firewall: only the API machine reaches the database.
+resource "aws_security_group" "db" {
+  name = "${var.project}-db"
+
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.api.id]
+  }
 }
 
 resource "aws_db_instance" "main" {

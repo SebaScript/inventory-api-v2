@@ -1,16 +1,76 @@
-data "aws_ssm_parameter" "al2023" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+data "aws_ami" "al2023" {
+  owners      = ["amazon"]
+  most_recent = true
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
 }
 
-# One virtual machine running the API container.
+# Firewall: only port 80 is open.
+resource "aws_security_group" "api" {
+  name = "${var.project}-api"
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Permissions: pull the image from ECR and use its own S3 bucket, with no AWS keys on the machine.
+resource "aws_iam_role" "api" {
+  name = "${var.project}-ec2"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecr" {
+  role       = aws_iam_role.api.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_role_policy" "s3" {
+  role = aws_iam_role.api.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:PutObject", "s3:GetObject"]
+      Resource = "${aws_s3_bucket.exports.arn}/*"
+    }]
+  })
+}
+
+resource "aws_iam_instance_profile" "api" {
+  name = var.project
+  role = aws_iam_role.api.name
+}
+
+# The machine: on first boot it runs user-data.sh, which installs Docker and starts the API.
 resource "aws_instance" "api" {
-  ami                    = data.aws_ssm_parameter.al2023.value
+  ami                    = data.aws_ami.al2023.id
   instance_type          = "t3.micro"
-  subnet_id              = data.aws_subnets.default.ids[0]
+  availability_zone      = "${var.region}a"
   vpc_security_group_ids = [aws_security_group.api.id]
   iam_instance_profile   = aws_iam_instance_profile.api.name
 
-  # A new image means a new machine: the script below only runs on first boot.
+  # A new image means a new machine: the script only runs on first boot.
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data.sh", {
     region       = var.region
