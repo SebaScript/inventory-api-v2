@@ -1,5 +1,3 @@
-#!/bin/bash
-# Runs once, on the first boot: installs Docker, seeds the database and starts the API.
 set -euo pipefail
 
 dnf install -y docker
