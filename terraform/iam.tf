@@ -1,51 +1,52 @@
-locals {
-  ecs_tasks_trust = jsonencode({
+# The machine's identity: no AWS keys on it, only what this role allows.
+resource "aws_iam_role" "api" {
+  name = "${var.project}-ec2"
+  assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
       Action    = "sts:AssumeRole"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Principal = { Service = "ec2.amazonaws.com" }
     }]
   })
 }
 
-# Used by ECS itself: pull the image, write the logs, read the database URL.
-resource "aws_iam_role" "execution" {
-  name               = "${var.project}-execution"
-  assume_role_policy = local.ecs_tasks_trust
+resource "aws_iam_role_policy_attachment" "ecr" {
+  role       = aws_iam_role.api.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
-resource "aws_iam_role_policy_attachment" "execution" {
-  role       = aws_iam_role.execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+# Lets Session Manager open a shell on the machine, without SSH keys or open ports.
+resource "aws_iam_role_policy_attachment" "ssm" {
+  role       = aws_iam_role.api.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_role_policy" "execution_ssm" {
-  role = aws_iam_role.execution.id
+resource "aws_iam_role_policy" "api" {
+  role = aws_iam_role.api.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = "ssm:GetParameters"
-      Resource = aws_ssm_parameter.database_url.arn
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ssm:GetParameter"
+        Resource = aws_ssm_parameter.database_url.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject"]
+        Resource = "${aws_s3_bucket.exports.arn}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.api.arn}:*"
+      },
+    ]
   })
 }
 
-# Used by the API code: only its own bucket, no keys in the container.
-resource "aws_iam_role" "task" {
-  name               = "${var.project}-task"
-  assume_role_policy = local.ecs_tasks_trust
-}
-
-resource "aws_iam_role_policy" "task_s3" {
-  role = aws_iam_role.task.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["s3:PutObject", "s3:GetObject"]
-      Resource = "${aws_s3_bucket.exports.arn}/*"
-    }]
-  })
+resource "aws_iam_instance_profile" "api" {
+  name = var.project
+  role = aws_iam_role.api.name
 }
