@@ -230,6 +230,12 @@ container and its volume.
 Every cloud-backed feature is off when its variable is unset, so the whole suite
 runs with nothing but PostgreSQL.
 
+## Infrastructure as code
+
+[`terraform/`](terraform/README.md) creates everything on AWS in one apply: RDS,
+ECR, S3, SSM, CloudWatch Logs, a load balancer and the API on ECS Fargate. The
+`Infrastructure` workflow deploys it, installs the API, and destroys it on demand.
+
 ## Deploying to a cluster
 
 `deploy/` holds the Kubernetes manifests: a Deployment with real probes, an
