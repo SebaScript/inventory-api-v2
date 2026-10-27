@@ -1,6 +1,6 @@
 {
   "name": "inventory-api",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Professional inventory REST API built with NestJS, TypeScript and PostgreSQL",
   "author": "SebaScript",
   "license": "MIT",
