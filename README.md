@@ -15,10 +15,174 @@ Docker is the only thing you need installed. To run the API on your own machine
 instead, `npm install` and `npm run start:dev`, with `npm run db:up` giving you
 just the database.
 
-There is nothing to migrate: TypeORM builds the schema from the entities on
-boot (`synchronize: true`), which is convenient here and would be dangerous on
-a database holding real data. `SEED=true` loads demo data, and the application
-refuses to seed whenever `NODE_ENV=production`.
+There is nothing to migrate: locally, TypeORM builds the schema from the entities
+on boot (`synchronize: true`), which is convenient here and would be dangerous on
+a database holding real data. Production turns it off: see
+[Expand / Contract](#expand--contract). `SEED=true` loads demo data, and the
+application refuses to seed whenever `NODE_ENV=production`.
+
+## Canary deployment
+
+A new version reaches production next to the current one and earns its traffic in
+stages. If it fails a stage, every request goes back to the stable version on its
+own.
+
+```mermaid
+flowchart LR
+  client([Clients]) -- ":80" --> alb
+
+  subgraph AWS["AWS us-east-1"]
+    alb["Application Load Balancer<br/>listener :80"]
+    tgs["Target group stable"]
+    tgc["Target group canary"]
+    ec2s["EC2 stable<br/>3.1.0 · APP_TRACK=stable"]
+    ec2c["EC2 canary<br/>3.2.0 · APP_TRACK=canary"]
+    rds[("RDS PostgreSQL<br/>one schema, expanded only")]
+    cw["CloudWatch<br/>dashboard · 2 alarms"]
+
+    alb -- "weight 100 - w" --> tgs --> ec2s
+    alb -- "weight w" --> tgc --> ec2c
+    alb -- "rule: x-canary: true" --> tgc
+    ec2s & ec2c --> rds
+    alb -. "requests, 4xx, 5xx, latency per target group" .-> cw
+    ec2s & ec2c -. "CPU, memory, movements" .-> cw
+  end
+
+  gh["GitHub Actions · Canary"] -- "terraform apply -var canary_weight=w" --> alb
+  gh -- "load, then gate: canary/slo.json" --> cw
+```
+
+| | |
+| --- | --- |
+| Provider | AWS (`us-east-1`), everything in [`terraform/`](terraform/README.md) |
+| Routing | The ALB listener forwards to two target groups by weight. A rule ahead of it sends any request with `x-canary: true` to the canary, whatever the weight |
+| Artifact | One Docker image per commit in ECR, tagged with the commit SHA. Tags are immutable: a tag always names the same image |
+| Who answered | Every response, errors and docs included, carries `X-App-Version` (from `package.json`) and `X-App-Track` (`stable` or `canary`) |
+
+### Two API versions in production
+
+| | stable track | canary track |
+| --- | --- | --- |
+| Release | 3.1.0 | 3.2.0 |
+| `/api/v2/...` | yes | yes, the same answers |
+| `/api/v3/...` | no | yes: items carry their bin `location` |
+| `/api/...` without a version | served as v2 | served as v3 |
+
+`/api/...` without a version serves the newest version the build has, so the same
+URL answers v2 or v3 depending on where the split sends it. Before promotion,
+`/api/v3/...` is reached with `x-canary: true`.
+
+### Stages
+
+| Stage | Canary share | How traffic gets there | Observation | Decided by |
+| --- | --- | --- | --- | --- |
+| 0 | 0% of the public | Only requests with `x-canary: true` | Until the canary target is healthy, then a smoke test of each track | Health check and headers |
+| 1 | 10% | ALB weights 90 / 10 | 3 min under 25 req/s: about 450 canary requests | Alarms during the bake, then the gate |
+| 2 | 50% | ALB weights 50 / 50 | 3 min: about 2,250 canary requests | Same |
+| 3 | 100% | ALB weights 0 / 100 | 3 min: about 4,500 canary requests | Same, on objectives only: no baseline is left |
+| Promoted | 0% | Stable is rebuilt with the canary's image, then the weight returns to 0 | | |
+
+*Actions → Canary → Run workflow*:
+
+- **deploy**, run on the commit or tag to release: builds its image if needed and puts it on the canary at 0% (stage 0);
+- **promote**: walks stages 1 to 3. `fault` makes the load ask the canary to fail, to rehearse an abort; `bake_minutes` sets each observation;
+- **rollback**: 0% to the canary, at once.
+
+A weight change is one `terraform apply` of the listener and takes about ten
+seconds. The load in each stage comes from [`canary/load.ts`](canary/load.ts): a
+steady, open-loop mix of reads and stock movements, the same for both tracks, that
+counts who answered each request. Run it from anywhere to see the split:
+
+```bash
+npx ts-node canary/load.ts --url http://<alb> --seconds 60 --rps 20
+```
+
+Sticky sessions are off: each request is routed on its own, which keeps the split
+exact, and one client may see v2 and then v3 on `/api/...`. Target-group stickiness
+on the listener would pin each client to one track, at the cost of a coarser split.
+
+### Promote, pause or abort: `canary/slo.json`
+
+The thresholds are versioned with the code. Terraform builds the alarms from them,
+and [`canary/gate.ts`](canary/gate.ts) judges each stage with them, from what
+CloudWatch measured on each target group during the bake.
+
+| Signal | Pause above | Abort above |
+| --- | --- | --- |
+| Canary 5xx rate | 1% | 5% |
+| Canary 4xx rate | 5% | 15% |
+| Canary p95 latency | 400 ms | 1,000 ms |
+| Canary 5xx rate minus stable's | 1 point | 3 points |
+| Canary p95 minus stable's | 100 ms | 300 ms |
+
+- **Abort** if any signal crosses its abort line, or if either alarm fires: the canary drops to 0% and the run fails.
+- **Pause** if any crosses a pause line, or if the canary served fewer than **300 requests**: the weight stays and the run ends with a warning, for a person to promote or roll back.
+- **Promote** otherwise: on to the next stage.
+
+The comparison with stable covers the same minutes under the same load, so neither
+track is judged against a quieter hour. It applies only while stable still receives
+traffic: at 100% the canary is judged on its objectives alone.
+
+Why 300 requests: to know an error rate near the 5% abort line within ±2.5 points
+at 95% confidence takes n = 1.96² × 0.05 × 0.95 / 0.025² ≈ 292. At 25 req/s the
+canary gets that many within three minutes even at 10%.
+
+### Fault injection
+
+On the canary only, `x-fault: error` answers 500 and `x-fault: latency` answers
+1.5 s late. The stable track ignores the header, so the same request shows both:
+
+```bash
+curl -i -H "x-canary: true" -H "x-fault: error" http://<alb>/api/items   # 500, X-App-Track: canary
+curl -i -H "x-fault: error" http://<alb>/api/items                       # 200, X-App-Track: stable
+```
+
+The fault answers before any handler runs, so a failing canary writes nothing: the
+data stays intact through the abort.
+
+### Automatic abort
+
+Two CloudWatch alarms watch the canary's target group every minute:
+`inventory-api-canary-errors` (5xx rate above 5%, with at least 30 requests in the
+minute) and `inventory-api-canary-latency` (p95 above 1 s). Each fires on two
+breaching minutes out of three. While a stage bakes, the pipeline checks them every
+20 seconds; one firing ends the stage early and sets the weight back to 0. After the
+bake, the gate judges the whole window.
+
+### Dashboard
+
+`terraform output dashboard_url` opens it. Every widget draws stable in green and
+the canary in orange, side by side: requests per minute, the canary's share of
+traffic (the stages and the rollback show up as steps), 5xx and 4xx rates, latency
+p50/p95/p99, CPU, memory, and **movements recorded per minute**, the business
+metric. Below them, the state of both alarms. The ALB measures traffic, errors and
+latency per target group, EC2 reports CPU every minute, and the API itself
+publishes memory and movements, tagged with its track.
+
+### Expand / Contract
+
+Both tracks share one database and either may be rolled back at any moment, so
+while two versions run the schema may only grow.
+
+1. **Expand (3.2.0).** Before the canary starts, its seed step runs
+   `ALTER TABLE items ADD COLUMN IF NOT EXISTS location varchar(40)`
+   ([`src/database/schema.ts`](src/database/schema.ts)). Nullable and without a
+   default, PostgreSQL adds it without rewriting the table, and 3.1.0's inserts stay valid.
+2. **Both versions run.** v3 reads and writes `location`. The column is not selected
+   unless asked for, so v1 and v2 answer exactly as before; v2 rejects it in a body,
+   and v2 updates leave it untouched.
+3. **Contract, later and never during a canary.** Only once no running build ignores
+   the column may a later release backfill it and make it required. Nothing is ever
+   renamed or dropped by the release that stops using it.
+
+A rollback keeps everything: the column and what v3 wrote stay, ignored by 3.1.0,
+and are back with the next promotion.
+
+What makes this hold: production runs with `DB_SYNC=false`, and the schema is built
+from the entities only on an empty database. TypeORM's `synchronize` in the old
+build would drop the column the new one added, exactly the destructive migration a
+canary cannot have. Both tracks boot at once on a new database, so the seed step
+takes a PostgreSQL advisory lock: one builds and seeds, the other waits.
 
 ## Architecture
 
@@ -219,8 +383,11 @@ container and its volume.
 | `test/items.spec.ts`         | Item CRUD, filters, **the QUERY endpoint**, discontinuation                    |
 | `test/movements.spec.ts`     | IN, OUT, insufficient stock, **concurrency**, the CHECK constraint             |
 | `test/errors.spec.ts`        | Error shape, database error mapping, no leaks in production                    |
-| `test/app.spec.ts`           | Health check, OpenAPI document, demo data consistency                          |
+| `test/app.spec.ts`           | Health check, OpenAPI document, release headers, the schema guard, demo data   |
 | `test/v2.spec.ts`            | The `/v2` surface, shared data, QUERY under v2, the Swagger tags               |
+| `test/v3.spec.ts`            | The bin location, v1 and v2 never seeing it, the expand step                   |
+| `test/canary.spec.ts`        | Fault injection on the canary only, the business metric                        |
+| `test/gate.spec.ts`          | Every promote, pause and abort decision of the canary gate                     |
 | `test/health.spec.ts`        | Liveness surviving a database outage while readiness fails                     |
 | `test/cache.spec.ts`         | Cache keys, the fallback with no cache server, invalidation                    |
 | `test/exports.spec.ts`       | CSV escaping, the metric document, the unconfigured export                     |
@@ -232,9 +399,11 @@ runs with nothing but PostgreSQL.
 
 ## Infrastructure as code
 
-[`terraform/`](terraform/README.md) creates four AWS services in one apply: an EC2
-machine that runs the API with Docker, an RDS database, an ECR registry and an S3
-bucket. The `Infrastructure` workflow deploys it, installs the API, and destroys it on demand.
+[`terraform/`](terraform/README.md) creates six AWS services in one apply: a load
+balancer, two EC2 machines that run the API with Docker (stable and canary), an RDS
+database, an ECR registry, an S3 bucket and the CloudWatch dashboard and alarms. The
+`Infrastructure` workflow deploys it, installs the API, and destroys it on demand;
+the `Canary` workflow rolls a new version out on it.
 
 ## Deploying to a cluster
 
