@@ -6,6 +6,7 @@ import { AppModule } from '../src/app.module';
 import { CacheService } from '../src/cache/cache.service';
 import { apiAlias } from '../src/common/api-alias';
 import { HttpExceptionFilter } from '../src/common/http-exception.filter';
+import { releaseHeaders } from '../src/common/release';
 import { ObjectStorageService } from '../src/storage/object-storage.service';
 import { setupSwagger } from '../src/swagger';
 
@@ -25,6 +26,7 @@ export async function createApp(
   const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication({ logger: false });
+  app.use(releaseHeaders);
   app.use(apiAlias);
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: VERSION_NEUTRAL });
   app.useGlobalPipes(

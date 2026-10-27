@@ -10,6 +10,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
 import { apiAlias } from './common/api-alias';
 import { HttpExceptionFilter } from './common/http-exception.filter';
+import { releaseHeaders } from './common/release';
 import { seed } from './database/seed';
 import { setupSwagger } from './swagger';
 
@@ -23,6 +24,7 @@ async function bootstrap(): Promise<void> {
 
   const logger = new Logger('Bootstrap');
 
+  app.use(releaseHeaders);
   // Before the router: `/api/v2/...` reaches the `/v2/...` handlers.
   app.use(apiAlias);
 
