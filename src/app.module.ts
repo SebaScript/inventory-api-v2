@@ -8,6 +8,7 @@ import { GroupsModule } from './groups/groups.module';
 import { HealthController } from './health.controller';
 import { InteropModule } from './interop/interop.module';
 import { ItemsModule } from './items/items.module';
+import { CloudWatchPublisher } from './metrics/cloudwatch.publisher';
 import { MetricsController } from './metrics/metrics.controller';
 import { HttpMetricsMiddleware } from './metrics/http-metrics.middleware';
 import { MovementsModule } from './movements/movements.module';
@@ -38,6 +39,7 @@ config({ quiet: true });
     InteropModule,
   ],
   controllers: [HealthController, MetricsController],
+  providers: [CloudWatchPublisher],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

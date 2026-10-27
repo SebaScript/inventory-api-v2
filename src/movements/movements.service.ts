@@ -11,6 +11,7 @@ import {
 import { Paginated } from '../common/pagination';
 import { Item, ItemStatus } from '../entities/item.entity';
 import { Movement, MovementType } from '../entities/movement.entity';
+import { movementsRecorded } from '../metrics/registry';
 import { CreateMovementDto, FindMovementsDto } from './movement.dto';
 
 @Injectable()
@@ -47,6 +48,7 @@ export class MovementsService {
 
     // Stock changed: every cached listing is now stale.
     await this.cache.bump(ITEMS_NAMESPACE);
+    movementsRecorded.inc();
     return movement;
   }
 

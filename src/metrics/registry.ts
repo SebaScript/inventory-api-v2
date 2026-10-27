@@ -41,3 +41,9 @@ export const partnerLookups = new Counter({
   labelNames: ['outcome'] as const,
   registers: [registry],
 });
+
+export const movementsRecorded = new Counter({
+  name: 'movements_recorded_total',
+  help: 'Stock movements recorded: the business metric each track is compared on',
+  registers: [registry],
+});
