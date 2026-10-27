@@ -24,5 +24,5 @@ export default tseslint.config(
       eqeqeq: 'error',
     },
   },
-  { files: ['src/database/**', 'test/**'], rules: { 'no-console': 'off' } },
+  { files: ['src/database/**', 'test/**', 'canary/**'], rules: { 'no-console': 'off' } },
 );
