@@ -1,5 +1,5 @@
 output "api_url" {
-  value = "http://${aws_instance.api.public_dns}"
+  value = "http://${aws_lb.api.dns_name}"
 }
 
 output "ecr_repository_url" {
