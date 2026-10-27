@@ -1,0 +1,129 @@
+name: Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: deploy puts this commit on the canary at 0%; promote walks it to 100% under load; rollback sends every request to stable
+        type: choice
+        options: [deploy, promote, rollback]
+        default: deploy
+      fault:
+        description: promote only. The load asks the canary to fail, to rehearse the automatic abort
+        type: choice
+        options: [none, error, latency]
+        default: none
+      bake_minutes:
+        description: Minutes each stage runs under load before the gate judges it
+        type: number
+        default: 3
+
+permissions:
+  contents: read
+
+# Shared with Infrastructure: two applies on the same state never run at once.
+concurrency: infrastructure
+
+defaults:
+  run:
+    working-directory: terraform
+
+env:
+  RPS: 25
+  FAULT: ${{ inputs.fault }}
+  BAKE_MINUTES: ${{ inputs.bake_minutes }}
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install the load generator and the gate
+        working-directory: .
+        run: npm ci
+
+      - name: Init, and read what each track runs now
+        run: |
+          BUCKET="inventory-api-tfstate-$(aws sts get-caller-identity --query Account --output text)"
+          terraform init -backend-config="bucket=$BUCKET"
+          {
+            echo "URL=$(terraform output -raw api_url)"
+            echo "STABLE=$(terraform output -raw stable_image_tag)"
+            echo "CANARY=$(terraform output -raw canary_image_tag)"
+            echo "GATE=$(terraform output -json canary_gate | jq -c .)"
+          } >> "$GITHUB_ENV"
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        if: inputs.action == 'deploy'
+
+      - name: Build and push this commit's image, unless it already exists
+        if: inputs.action == 'deploy'
+        run: |
+          IMAGE="$(terraform output -raw ecr_repository_url):$GITHUB_SHA"
+          if ! docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            docker build -t "$IMAGE" ..
+            docker push "$IMAGE"
+          fi
+
+      - name: Stage 0 - the canary runs this commit, reachable only with x-canary true
+        if: inputs.action == 'deploy'
+        run: |
+          terraform apply -auto-approve -input=false -var="stable_image_tag=$STABLE" \
+            -var="canary_image_tag=$GITHUB_SHA" -var="canary_weight=0"
+          aws elbv2 wait target-in-service --target-group-arn "$(jq -r .target_groups.canary.arn <<< "$GATE")"
+          for HEADER in "x-canary: true" "x-canary: false"; do
+            curl --fail --silent --show-error --retry 10 --retry-all-errors -H "$HEADER" -D - -o /dev/null \
+              "$URL/health/ready" | grep -i "^x-app-" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Stage 1 - 10% of public traffic to the canary
+        id: stage1
+        if: inputs.action == 'promote'
+        run: ../canary/stage.sh 10
+
+      - name: Stage 2 - 50%
+        id: stage2
+        if: inputs.action == 'promote' && env.PAUSED != 'true'
+        run: ../canary/stage.sh 50
+
+      - name: Stage 3 - 100%
+        id: stage3
+        if: inputs.action == 'promote' && env.PAUSED != 'true'
+        run: ../canary/stage.sh 100
+
+      - name: Promoted - stable takes the canary's image, then the canary steps back to 0%
+        if: inputs.action == 'promote' && env.PAUSED != 'true'
+        run: |
+          terraform apply -auto-approve -input=false -var="stable_image_tag=$CANARY" \
+            -var="canary_image_tag=$CANARY" -var="canary_weight=100"
+          aws elbv2 wait target-in-service --target-group-arn "$(jq -r .target_groups.stable.arn <<< "$GATE")"
+          terraform apply -auto-approve -input=false -var="stable_image_tag=$CANARY" \
+            -var="canary_image_tag=$CANARY" -var="canary_weight=0"
+          echo "**PROMOTED**: stable now runs $CANARY" >> "$GITHUB_STEP_SUMMARY"
+
+      # Only a failed stage rolls back: once stable runs the new image, the old one is no refuge.
+      - name: Rollback - every request back to stable
+        if: >-
+          inputs.action == 'rollback' || (failure() && (steps.stage1.outcome == 'failure' ||
+          steps.stage2.outcome == 'failure' || steps.stage3.outcome == 'failure'))
+        run: |
+          terraform apply -auto-approve -input=false -var="stable_image_tag=$STABLE" \
+            -var="canary_image_tag=$CANARY" -var="canary_weight=0"
+          echo "**ROLLED BACK**: 0% to the canary, 100% to stable ($STABLE)" >> "$GITHUB_STEP_SUMMARY"
