@@ -64,6 +64,26 @@ export class UpdateItemDto extends PartialType(OmitType(CreateItemDto, ['quantit
   status?: ItemStatus;
 }
 
+const BIN_LOCATION = { example: 'A-03-2', description: 'Bin in the warehouse. New in v3' };
+
+export class CreateItemV3Dto extends CreateItemDto {
+  @ApiPropertyOptional(BIN_LOCATION)
+  @Transform(upper)
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  location?: string;
+}
+
+export class UpdateItemV3Dto extends UpdateItemDto {
+  @ApiPropertyOptional(BIN_LOCATION)
+  @Transform(upper)
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  location?: string;
+}
+
 /** `ALL` includes discontinued items; listings default to active only. */
 export enum StatusFilter {
   ACTIVE = 'ACTIVE',
