@@ -53,6 +53,8 @@ locals {
 }
 
 # Detection: either alarm firing during a stage makes the pipeline send every request back to stable.
+# FILL(..., 0): a minute without canary traffic counts as healthy. Without it, an alarm with no new
+# data keeps looking back at the minutes that broke it, and never clears after a rollback.
 resource "aws_cloudwatch_metric_alarm" "canary_errors" {
   alarm_name          = "${var.project}-canary-errors"
   alarm_description   = "Canary 5xx rate above the abort threshold in canary/slo.json"
@@ -60,12 +62,15 @@ resource "aws_cloudwatch_metric_alarm" "canary_errors" {
   threshold           = local.slo.objectives.errorRate.abort * 100
   evaluation_periods  = 3
   datapoints_to_alarm = 2
-  treat_missing_data  = "notBreaching"
 
   metric_query {
     id          = "rate"
-    expression  = "IF(requests >= 30, 100 * FILL(errors, 0) / requests, 0)"
+    expression  = "IF(served >= 30, 100 * FILL(errors, 0) / served, 0)"
     return_data = true
+  }
+  metric_query {
+    id         = "served"
+    expression = "FILL(requests, 0)"
   }
   metric_query {
     id = "requests"
@@ -92,16 +97,26 @@ resource "aws_cloudwatch_metric_alarm" "canary_errors" {
 resource "aws_cloudwatch_metric_alarm" "canary_latency" {
   alarm_name          = "${var.project}-canary-latency"
   alarm_description   = "Canary p95 latency above the abort threshold in canary/slo.json"
-  namespace           = "AWS/ApplicationELB"
-  metric_name         = "TargetResponseTime"
-  extended_statistic  = "p95"
-  period              = 60
   comparison_operator = "GreaterThanThreshold"
   threshold           = local.slo.objectives.p95LatencyMs.abort / 1000
   evaluation_periods  = 3
   datapoints_to_alarm = 2
-  treat_missing_data  = "notBreaching"
-  dimensions          = { TargetGroup = aws_lb_target_group.api["canary"].arn_suffix, LoadBalancer = aws_lb.api.arn_suffix }
+
+  metric_query {
+    id          = "latency"
+    expression  = "FILL(p95, 0)"
+    return_data = true
+  }
+  metric_query {
+    id = "p95"
+    metric {
+      namespace   = "AWS/ApplicationELB"
+      metric_name = "TargetResponseTime"
+      stat        = "p95"
+      period      = 60
+      dimensions  = { TargetGroup = aws_lb_target_group.api["canary"].arn_suffix, LoadBalancer = aws_lb.api.arn_suffix }
+    }
+  }
 }
 
 resource "aws_cloudwatch_dashboard" "canary" {
