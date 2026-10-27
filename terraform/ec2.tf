@@ -27,7 +27,7 @@ resource "aws_security_group" "api" {
   }
 }
 
-# Permissions: pull the image from ECR and use its own S3 bucket, with no AWS keys on the machine.
+# Permissions: pull the image from ECR, use its own S3 bucket and publish metrics, with no AWS keys on the machine.
 resource "aws_iam_role" "api" {
   name = "${var.project}-ec2"
   assume_role_policy = jsonencode({
@@ -57,6 +57,20 @@ resource "aws_iam_role_policy" "s3" {
   })
 }
 
+# Memory and the business metric, which only the app can measure. Only into its own namespace.
+resource "aws_iam_role_policy" "metrics" {
+  role = aws_iam_role.api.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "cloudwatch:PutMetricData"
+      Resource  = "*"
+      Condition = { StringEquals = { "cloudwatch:namespace" = var.project } }
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "api" {
   name = var.project
   role = aws_iam_role.api.name
@@ -71,6 +85,7 @@ resource "aws_instance" "api" {
   availability_zone      = "${var.region}a"
   vpc_security_group_ids = [aws_security_group.api.id]
   iam_instance_profile   = aws_iam_instance_profile.api.name
+  monitoring             = true # CPU every minute, not every five: a stage bakes for minutes
 
   # A new image means a new machine: the script only runs on first boot.
   user_data_replace_on_change = true
@@ -80,6 +95,7 @@ resource "aws_instance" "api" {
     track        = each.key
     database_url = "postgres://${aws_db_instance.main.username}:${random_password.db.result}@${aws_db_instance.main.endpoint}/${aws_db_instance.main.db_name}"
     bucket       = aws_s3_bucket.exports.bucket
+    namespace    = var.project
   })
 
   # Hop limit 2: the container is one network hop away and needs the role's credentials.
