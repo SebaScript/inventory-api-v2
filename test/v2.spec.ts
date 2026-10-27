@@ -73,8 +73,9 @@ describe('API v2', () => {
     const viaApiV2 = (await api.get('/api/v2/items/1').expect(200)).body;
     expect(viaApiV2).toEqual(viaV2);
 
-    // Without a version, /api serves the current one.
-    expect((await api.get('/api/items/1').expect(200)).body).toEqual(viaV2);
+    // Without a version, /api serves the newest one.
+    const viaV3 = (await api.get('/v3/items/1').expect(200)).body;
+    expect((await api.get('/api/items/1').expect(200)).body).toEqual(viaV3);
     await api.get('/api/version').expect(404);
   });
 

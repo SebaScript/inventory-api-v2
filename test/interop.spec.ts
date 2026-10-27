@@ -89,7 +89,7 @@ describe('Interop with the other cloud', () => {
   it('documents both halves of the contract', async () => {
     const { body } = await api.get('/docs-json').expect(200);
 
-    expect(body.paths['/v2/interop/random'].get.tags).toEqual(['Interop v2']);
+    expect(body.paths['/v2/interop/random'].get.tags).toEqual(['Interop v2, v3']);
     expect(body.paths['/v2/items/{id}'].get.summary).toContain('other cloud');
   });
 });

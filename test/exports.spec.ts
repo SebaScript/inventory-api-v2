@@ -74,7 +74,7 @@ describe('Exports', () => {
   it('is documented and lives outside the items resource', async () => {
     const { body } = await api.get('/docs-json').expect(200);
 
-    expect(body.paths['/v2/exports/items'].post.tags).toEqual(['Exports v2']);
+    expect(body.paths['/v2/exports/items'].post.tags).toEqual(['Exports v2, v3']);
     expect(body.paths['/v2/items/{id}']).not.toHaveProperty('export');
   });
 });
