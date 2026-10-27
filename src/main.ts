@@ -9,6 +9,7 @@ import { NestFactory } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
 import { apiAlias } from './common/api-alias';
+import { faultInjection } from './common/fault';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 import { releaseHeaders } from './common/release';
 import { seed } from './database/seed';
@@ -25,6 +26,7 @@ async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
 
   app.use(releaseHeaders);
+  app.use(faultInjection);
   // Before the router: `/api/v2/...` reaches the `/v2/...` handlers.
   app.use(apiAlias);
 

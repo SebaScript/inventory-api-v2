@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { CacheService } from '../src/cache/cache.service';
 import { apiAlias } from '../src/common/api-alias';
+import { faultInjection } from '../src/common/fault';
 import { HttpExceptionFilter } from '../src/common/http-exception.filter';
 import { releaseHeaders } from '../src/common/release';
 import { ObjectStorageService } from '../src/storage/object-storage.service';
@@ -27,6 +28,7 @@ export async function createApp(
 
   const app = moduleRef.createNestApplication({ logger: false });
   app.use(releaseHeaders);
+  app.use(faultInjection);
   app.use(apiAlias);
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: VERSION_NEUTRAL });
   app.useGlobalPipes(
