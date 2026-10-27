@@ -4,6 +4,19 @@
 set -euo pipefail
 WEIGHT=$1
 
+read -ra ALARMS <<< "$(jq -r '.alarms | join(" ")' <<< "$GATE")"
+firing() {
+  aws cloudwatch describe-alarms --alarm-names "${ALARMS[@]}" --state-value ALARM \
+    --query 'MetricAlarms[].AlarmName' --output text
+}
+
+# An alarm still firing from an earlier rollout says nothing about this one: let it clear first.
+for _ in $(seq 30); do
+  [ -z "$(firing)" ] && break
+  echo "Waiting for $(firing) to clear"
+  sleep 20
+done
+
 terraform apply -auto-approve -input=false -var="stable_image_tag=$STABLE" \
   -var="canary_image_tag=$CANARY" -var="canary_weight=$WEIGHT"
 echo "### $WEIGHT% of traffic to the canary" >> "$GITHUB_STEP_SUMMARY"
@@ -13,11 +26,9 @@ npx ts-node ../canary/load.ts --url "$URL" --seconds $((BAKE_MINUTES * 60)) --rp
 LOAD=$!
 
 # The alarms judge every minute: one firing ends the stage without waiting for the bake.
-read -ra ALARMS <<< "$(jq -r '.alarms | join(" ")' <<< "$GATE")"
 while kill -0 "$LOAD" 2> /dev/null; do
   sleep 20
-  FIRING=$(aws cloudwatch describe-alarms --alarm-names "${ALARMS[@]}" --state-value ALARM \
-    --query 'MetricAlarms[].AlarmName' --output text)
+  FIRING=$(firing)
   if [ -n "$FIRING" ]; then
     kill "$LOAD"
     echo "**ABORT**: alarm $FIRING firing" | tee -a "$GITHUB_STEP_SUMMARY"
