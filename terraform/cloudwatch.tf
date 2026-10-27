@@ -21,14 +21,15 @@ locals {
     }
   }
 
+  # concat(...) and not flatten(): flatten would also break each metric into loose strings.
   rate_lines = {
-    for kind in ["errors", "rejected"] : kind => flatten([
+    for kind in ["errors", "rejected"] : kind => concat([
       for track, m in local.per_track : [
         concat(m.requests, [{ id = "r_${track}", stat = "Sum", visible = false }]),
         concat(m[kind], [{ id = "e_${track}", stat = "Sum", visible = false }]),
         [{ expression = "100 * FILL(e_${track}, 0) / r_${track}", label = track, color = local.colors[track] }],
       ]
-    ])
+    ]...)
   }
 
   widgets = [
@@ -40,11 +41,11 @@ locals {
     ]],
     ["5xx error rate (%)", local.rate_lines.errors],
     ["4xx error rate (%)", local.rate_lines.rejected],
-    ["Latency p50 / p95 / p99 (seconds)", flatten([
+    ["Latency p50 / p95 / p99 (seconds)", concat([
       for track, m in local.per_track : [
         for p in ["p50", "p95", "p99"] : concat(m.latency, [{ stat = p, label = "${track} ${p}", color = local.colors[track] }])
       ]
-    ])],
+    ]...)],
     ["CPU (%)", [for track, m in local.per_track : concat(m.cpu, [{ stat = "Average", label = track, color = local.colors[track] }])]],
     ["Memory (MB)", [for track, m in local.per_track : concat(m.memory, [{ stat = "Average", label = track, color = local.colors[track] }])]],
     ["Movements recorded per minute (business)", [for track, m in local.per_track : concat(m.business, [{ stat = "Sum", label = track, color = local.colors[track] }])]],
