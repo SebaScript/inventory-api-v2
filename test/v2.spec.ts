@@ -73,8 +73,8 @@ describe('API v2', () => {
     const viaApiV2 = (await api.get('/api/v2/items/1').expect(200)).body;
     expect(viaApiV2).toEqual(viaV2);
 
-    // The rewrite is anchored to a version segment, so it leaves the rest alone.
-    await api.get('/api/items/1').expect(404);
+    // Without a version, /api serves the current one.
+    expect((await api.get('/api/items/1').expect(200)).body).toEqual(viaV2);
     await api.get('/api/version').expect(404);
   });
 
