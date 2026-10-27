@@ -1,0 +1,12 @@
+{
+  "minRequestsPerTrack": 300,
+  "objectives": {
+    "errorRate": { "pause": 0.01, "abort": 0.05 },
+    "clientErrorRate": { "pause": 0.05, "abort": 0.15 },
+    "p95LatencyMs": { "pause": 400, "abort": 1000 }
+  },
+  "versusStable": {
+    "errorRateExcess": { "pause": 0.01, "abort": 0.03 },
+    "p95LatencyExcessMs": { "pause": 100, "abort": 300 }
+  }
+}
