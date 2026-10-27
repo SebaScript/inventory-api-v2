@@ -36,7 +36,7 @@ flowchart LR
     tgs["Target group stable"]
     tgc["Target group canary"]
     ec2s["EC2 stable<br/>3.1.0 · APP_TRACK=stable"]
-    ec2c["EC2 canary<br/>3.2.1 · APP_TRACK=canary"]
+    ec2c["EC2 canary<br/>3.2.2 · APP_TRACK=canary"]
     rds[("RDS PostgreSQL<br/>one schema, expanded only")]
     cw["CloudWatch<br/>dashboard · 2 alarms"]
 
@@ -63,7 +63,7 @@ flowchart LR
 
 | | stable track | canary track |
 | --- | --- | --- |
-| Release | 3.1.0 | 3.2.1 |
+| Release | 3.1.0 | 3.2.2 |
 | `/api/v2/...` | yes | yes, the same answers |
 | `/api/v3/...` | no | yes: items carry their bin `location` |
 | `/api/...` without a version | served as v2 | served as v3 |
