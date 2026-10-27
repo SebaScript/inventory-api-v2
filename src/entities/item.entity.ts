@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiHideProperty, ApiProperty } from '@nestjs/swagger';
 import {
   Check,
   Column,
@@ -54,6 +54,14 @@ export class Item {
     transformer: numericColumn,
   })
   unitPrice: number;
+
+  /**
+   * New in v3, added by expanding the table: nullable, so builds that never heard of it keep
+   * working on the same database. Not selected unless asked, so v1 and v2 keep their exact shape.
+   */
+  @ApiHideProperty()
+  @Column({ type: 'varchar', length: 40, nullable: true, select: false })
+  location?: string | null;
 
   @ApiProperty({ enum: ItemStatus, example: ItemStatus.ACTIVE })
   @Column({ type: 'enum', enum: ItemStatus, enumName: 'item_status', default: ItemStatus.ACTIVE })
