@@ -16,8 +16,8 @@ import { CORRELATION_HEADER } from '../common/correlation';
 import { FlowMessage, InteropRecord } from './interop.contract';
 import { InteropService } from './interop.service';
 
-@ApiTags('Interop v2')
-@Controller({ path: 'interop', version: '2' })
+@ApiTags('Interop v2, v3')
+@Controller({ path: 'interop', version: ['2', '3'] })
 export class InteropV2Controller {
   constructor(private readonly service: InteropService) {}
 

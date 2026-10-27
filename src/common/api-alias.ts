@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 
 /** What `/api/...` without a version serves: the newest version this build has. */
-export const CURRENT_API_VERSION = 'v2';
+export const CURRENT_API_VERSION = 'v3';
 
 /** `/api/v2/...`, `/api/v2?x=1` and a bare `/api/v2`, but never `/api/version`. */
 const VERSIONED = /^\/api\/v\d+(?=[/?]|$)/;

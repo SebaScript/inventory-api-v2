@@ -3,8 +3,8 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ExportResult, ExportsService } from './exports.service';
 
 /** POST: every call creates a file in S3. Own resource, so it never competes with `@Get(':id')`. */
-@ApiTags('Exports v2')
-@Controller({ path: 'exports', version: '2' })
+@ApiTags('Exports v2, v3')
+@Controller({ path: 'exports', version: ['2', '3'] })
 export class ExportsV2Controller {
   constructor(private readonly service: ExportsService) {}
 
