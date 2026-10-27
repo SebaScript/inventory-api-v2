@@ -8,15 +8,15 @@ data "aws_ami" "al2023" {
   }
 }
 
-# Firewall: only port 80 is open.
+# Firewall: port 80, and only from the load balancer.
 resource "aws_security_group" "api" {
   name = "${var.project}-api"
 
   ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
   }
 
   egress {
@@ -62,8 +62,10 @@ resource "aws_iam_instance_profile" "api" {
   role = aws_iam_role.api.name
 }
 
-# The machine: on first boot it runs user-data.sh, which installs Docker and starts the API.
+# One machine per track: on first boot it runs user-data.sh, which installs Docker and starts the API.
 resource "aws_instance" "api" {
+  for_each = local.tracks
+
   ami                    = data.aws_ami.al2023.id
   instance_type          = "t3.micro"
   availability_zone      = "${var.region}a"
@@ -74,7 +76,8 @@ resource "aws_instance" "api" {
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data.sh", {
     region       = var.region
-    image        = "${aws_ecr_repository.api.repository_url}:${var.image_tag}"
+    image        = "${aws_ecr_repository.api.repository_url}:${each.value}"
+    track        = each.key
     database_url = "postgres://${aws_db_instance.main.username}:${random_password.db.result}@${aws_db_instance.main.endpoint}/${aws_db_instance.main.db_name}"
     bucket       = aws_s3_bucket.exports.bucket
   })
@@ -86,6 +89,6 @@ resource "aws_instance" "api" {
   }
 
   tags = {
-    Name = var.project
+    Name = "${var.project}-${each.key}"
   }
 }
