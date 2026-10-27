@@ -1,5 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { version } from '../package.json';
+import { ensureSchema } from '../src/database/schema';
 import { seed } from '../src/database/seed';
 import { Item } from '../src/entities/item.entity';
 import { Movement, MovementType } from '../src/entities/movement.entity';
@@ -37,6 +39,26 @@ describe('Application', () => {
 
     expect(body.paths['/items/search']).not.toHaveProperty('query');
     expect(body.info.description).toContain('QUERY /items/search');
+  });
+
+  it('tags every response, errors and docs included, with its version and track', async () => {
+    for (const path of ['/health', '/api/v2/items', '/nowhere', '/docs-json']) {
+      const response = await api.get(path);
+      expect(response.headers['x-app-version']).toBe(version);
+      expect(response.headers['x-app-track']).toBe('stable');
+    }
+  });
+
+  it('never synchronizes an existing schema, so columns a newer build added survive', async () => {
+    await dataSource.query('ALTER TABLE items ADD COLUMN newer_build_column text');
+
+    expect(await ensureSchema(dataSource)).toContain('kept');
+    const [column] = await dataSource.query(
+      `SELECT 1 FROM information_schema.columns WHERE column_name = 'newer_build_column'`,
+    );
+    expect(column).toBeDefined();
+
+    await dataSource.query('ALTER TABLE items DROP COLUMN newer_build_column');
   });
 
   it('seeds demo data where every stock equals the sum of its own movements', async () => {
