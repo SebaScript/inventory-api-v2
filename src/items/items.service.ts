@@ -53,11 +53,11 @@ export class ItemsService {
     });
 
     await this.cache.bump(ITEMS_NAMESPACE);
-    return this.visible(item);
+    return item;
   }
 
   async findAll(query: FindItemsDto): Promise<Paginated<Item>> {
-    const qb = this.select();
+    const qb = this.items.createQueryBuilder('item').leftJoinAndSelect('item.group', 'group');
 
     // Listings show active items unless asked otherwise.
     const status = query.status ?? StatusFilter.ACTIVE;
@@ -74,7 +74,10 @@ export class ItemsService {
 
   /** Backing query for `QUERY /items/search`. */
   async search(dto: SearchItemsDto): Promise<Paginated<Item>> {
-    const qb = this.select().where('item.status = :status', { status: ItemStatus.ACTIVE });
+    const qb = this.items
+      .createQueryBuilder('item')
+      .leftJoinAndSelect('item.group', 'group')
+      .where('item.status = :status', { status: ItemStatus.ACTIVE });
 
     if (dto.text) {
       qb.andWhere('(item.name ILIKE :t OR item.sku ILIKE :t)', { t: `%${dto.text}%` });
@@ -88,7 +91,7 @@ export class ItemsService {
 
   /** Discontinued items are still readable, so their history stays auditable. */
   async findOne(id: number): Promise<Item> {
-    const item = await this.select().where('item.id = :id', { id }).getOne();
+    const item = await this.items.findOne({ where: { id }, relations: { group: true } });
     if (!item) throw new ItemNotFoundException(id);
     return item;
   }
@@ -108,17 +111,6 @@ export class ItemsService {
     await this.findOne(id);
     await this.items.update(id, { status: ItemStatus.DISCONTINUED });
     await this.cache.bump(ITEMS_NAMESPACE);
-  }
-
-  /** Every read starts here: the columns a version shows are decided in one place. */
-  protected select(): SelectQueryBuilder<Item> {
-    return this.items.createQueryBuilder('item').leftJoinAndSelect('item.group', 'group');
-  }
-
-  /** An insert fills the location with null: a write answers with the columns reads show. */
-  protected visible(item: Item): Item {
-    delete item.location;
-    return item;
   }
 
   private async paginate(
@@ -145,17 +137,5 @@ export class ItemsService {
       ...(exceptId ? { id: Not(exceptId) } : {}),
     });
     if (clash) throw new DuplicateSkuException(sku.toUpperCase());
-  }
-}
-
-/** v3 reads one column more: the bin location, which older versions never select. */
-@Injectable()
-export class ItemsV3Service extends ItemsService {
-  protected override select(): SelectQueryBuilder<Item> {
-    return super.select().addSelect('item.location');
-  }
-
-  protected override visible(item: Item): Item {
-    return item;
   }
 }

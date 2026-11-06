@@ -8,7 +8,6 @@ export function setupSwagger(app: INestApplication): void {
     .setDescription(
       'Inventory management over three entities: Group -> Item -> Movement.\n\n' +
         'Every resource is served at its bare path, under `/v2` and under `/v3`. ' +
-        'v3 adds the bin `location` of each item, which v1 and v2 never show. ' +
         '`/api/...` without a version serves the newest one.\n\n' +
         '**QUERY /items/search**: advanced search over the HTTP QUERY verb, which is ' +
         'safe and idempotent like GET but carries a request body. Neither it nor its ' +
