@@ -53,7 +53,7 @@ export class ItemsService {
     });
 
     await this.cache.bump(ITEMS_NAMESPACE);
-    return item;
+    return this.present(item);
   }
 
   async findAll(query: FindItemsDto): Promise<Paginated<Item>> {
@@ -93,7 +93,7 @@ export class ItemsService {
   async findOne(id: number): Promise<Item> {
     const item = await this.items.findOne({ where: { id }, relations: { group: true } });
     if (!item) throw new ItemNotFoundException(id);
-    return item;
+    return this.present(item);
   }
 
   async update(id: number, dto: UpdateItemDto): Promise<Item> {
@@ -113,6 +113,11 @@ export class ItemsService {
     await this.cache.bump(ITEMS_NAMESPACE);
   }
 
+  /** Every item leaves through here, so a version can add to what it shows. */
+  protected present(item: Item): Item {
+    return item;
+  }
+
   private async paginate(
     qb: SelectQueryBuilder<Item>,
     page: number,
@@ -123,7 +128,12 @@ export class ItemsService {
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
-    return new Paginated(data, total, page, limit);
+    return new Paginated(
+      data.map((item) => this.present(item)),
+      total,
+      page,
+      limit,
+    );
   }
 
   private async assertGroupExists(groupId: number): Promise<void> {
@@ -137,5 +147,14 @@ export class ItemsService {
       ...(exceptId ? { id: Not(exceptId) } : {}),
     });
     if (clash) throw new DuplicateSkuException(sku.toUpperCase());
+  }
+}
+
+/** v3: every item also says what its stock is worth. Computed on the way out, never stored. */
+@Injectable()
+export class ItemsV3Service extends ItemsService {
+  protected override present(item: Item): Item {
+    const stockValue = Math.round(item.quantity * item.unitPrice * 100) / 100;
+    return Object.assign(item, { stockValue });
   }
 }
