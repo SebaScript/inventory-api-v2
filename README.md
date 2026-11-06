@@ -36,8 +36,8 @@ flowchart LR
     tgs["Target group stable"]
     tgc["Target group canary"]
     ec2s["EC2 stable<br/>3.1.0 · APP_TRACK=stable"]
-    ec2c["EC2 canary<br/>3.2.2 · APP_TRACK=canary"]
-    rds[("RDS PostgreSQL<br/>one schema, expanded only")]
+    ec2c["EC2 canary<br/>4.0.0 · APP_TRACK=canary"]
+    rds[("RDS PostgreSQL<br/>one schema, the same for both")]
     cw["CloudWatch<br/>dashboard · 2 alarms"]
 
     alb -- "weight 100 - w" --> tgs --> ec2s
@@ -63,9 +63,9 @@ flowchart LR
 
 | | stable track | canary track |
 | --- | --- | --- |
-| Release | 3.1.0 | 3.2.2 |
+| Release | 3.1.0 | 4.0.0 |
 | `/api/v2/...` | yes | yes, the same answers |
-| `/api/v3/...` | no | yes: items carry their bin `location` |
+| `/api/v3/...` | no | yes: each item carries `stockValue`, what its stock is worth |
 | `/api/...` without a version | served as v2 | served as v3 |
 
 `/api/...` without a version serves the newest version the build has, so the same
@@ -161,28 +161,29 @@ publishes memory and movements, tagged with its track.
 
 ### Expand / Contract
 
-Both tracks share one database and either may be rolled back at any moment, so
-while two versions run the schema may only grow.
+Both tracks share one database and either may be rolled back at any moment, so v3
+changes what the API answers, never what the database holds.
 
-1. **Expand (3.2.0).** Before the canary starts, its seed step runs
-   `ALTER TABLE items ADD COLUMN IF NOT EXISTS location varchar(40)`
-   ([`src/database/schema.ts`](src/database/schema.ts)). Nullable and without a
-   default, PostgreSQL adds it without rewriting the table, and 3.1.0's inserts stay valid.
-2. **Both versions run.** v3 reads and writes `location`. The column is not selected
-   unless asked for, so v1 and v2 answer exactly as before; v2 rejects it in a body,
-   and v2 updates leave it untouched.
-3. **Contract, later and never during a canary.** Only once no running build ignores
-   the column may a later release backfill it and make it required. Nothing is ever
-   renamed or dropped by the release that stops using it.
+1. **Expand (4.0.0).** v3 is added next to v2. Its one change is `stockValue` on each
+   item: `quantity × unitPrice`, computed as the response leaves and never stored. It
+   reads the columns v2 reads, so the schema 3.1.0 built stays exactly as it is, and
+   no migration runs.
+2. **Both versions run.** v2 answers exactly as before, on either track. A write
+   through v3 is a write to the same columns under the same rules, so v2 reads it at
+   once; `stockValue` in a body is rejected, since nobody stores it. The cache gains no
+   key and v3 writes invalidate v2's cached listings as v2 writes do. The API uses no queues.
+3. **Contract, later and never during a canary.** Once no client calls `/v2`, a later
+   major release may retire it. The release that adds v3 removes nothing.
 
-A rollback keeps everything: the column and what v3 wrote stay, ignored by 3.1.0,
-and are back with the next promotion.
+A rollback loses nothing: no column, row or cache entry exists that only v3
+understands. Computing the value is what keeps it that way: a stored `stock_value`
+would need its own expand, a backfill, and both versions keeping it in step.
 
-What makes this hold: production runs with `DB_SYNC=false`, and the schema is built
-from the entities only on an empty database. TypeORM's `synchronize` in the old
-build would drop the column the new one added, exactly the destructive migration a
-canary cannot have. Both tracks boot at once on a new database, so the seed step
-takes a PostgreSQL advisory lock: one builds and seeds, the other waits.
+What guards the shared database: production runs with `DB_SYNC=false`, and the
+schema is built from the entities only on an empty database, so no build ever
+reshapes a schema another build is running on. Both tracks boot at once on a new
+database, so the seed step takes a PostgreSQL advisory lock: one builds and seeds,
+the other waits.
 
 ## Architecture
 
@@ -385,7 +386,7 @@ container and its volume.
 | `test/errors.spec.ts`        | Error shape, database error mapping, no leaks in production                    |
 | `test/app.spec.ts`           | Health check, OpenAPI document, release headers, the schema guard, demo data   |
 | `test/v2.spec.ts`            | The `/v2` surface, shared data, QUERY under v2, the Swagger tags               |
-| `test/v3.spec.ts`            | The bin location, v1 and v2 never seeing it, the expand step                   |
+| `test/v3.spec.ts`            | The stock value, v1 and v2 unchanged, the table v2 built left as it was        |
 | `test/canary.spec.ts`        | Fault injection on the canary only, the business metric                        |
 | `test/gate.spec.ts`          | Every promote, pause and abort decision of the canary gate                     |
 | `test/health.spec.ts`        | Liveness surviving a database outage while readiness fails                     |
