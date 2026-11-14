@@ -1,5 +1,7 @@
-import { Controller, HttpCode, Post } from '@nestjs/common';
+import { Controller, HttpCode, Post, Req } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Request } from 'express';
+import { requestedFault } from '../common/fault';
 import { ExportResult, ExportsService } from './exports.service';
 
 /** POST: every call creates a file in S3. Own resource, so it never competes with `@Get(':id')`. */
@@ -29,7 +31,7 @@ export class ExportsV2Controller {
     },
   })
   @ApiResponse({ status: 503, description: 'Object storage is not configured' })
-  create(): Promise<ExportResult> {
-    return this.service.exportItems();
+  create(@Req() request: Request): Promise<ExportResult> {
+    return this.service.exportItems(requestedFault(request) === 'slow-db');
   }
 }

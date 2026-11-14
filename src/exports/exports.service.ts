@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { ExportUnavailableException } from '../common/exceptions';
+import { SLOW_QUERY_SECONDS } from '../common/fault';
 import { Item } from '../entities/item.entity';
 import { ObjectStorageService } from '../storage/object-storage.service';
 import { toCsv } from './csv';
@@ -24,11 +25,18 @@ export class ExportsService {
     private readonly storage: ObjectStorageService,
   ) {}
 
-  /** Snapshots the inventory to object storage and hands back a temporary link. */
-  async exportItems(): Promise<ExportResult> {
+  /**
+   * Snapshots the inventory to object storage and hands back a temporary link.
+   * `slow` is the injected fault: the report holds its connection for seconds.
+   */
+  async exportItems(slow = false): Promise<ExportResult> {
     if (!this.storage.configured) throw new ExportUnavailableException();
 
-    const items = await this.items.find({ relations: { group: true }, order: { id: 'ASC' } });
+    // One transaction: the sleep and the read share a pooled connection, as a slow report would.
+    const items = await this.items.manager.transaction(async (manager) => {
+      if (slow) await manager.query('SELECT pg_sleep($1)', [SLOW_QUERY_SECONDS]);
+      return manager.find(Item, { relations: { group: true }, order: { id: 'ASC' } });
+    });
     const body = toCsv(items);
     const key = `${PREFIX}/items-${new Date().toISOString()}-${randomUUID()}.csv`;
 
