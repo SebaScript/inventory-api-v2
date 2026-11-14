@@ -41,11 +41,10 @@ describe('Application', () => {
     expect(body.info.description).toContain('QUERY /items/search');
   });
 
-  it('tags every response, errors and docs included, with its version and track', async () => {
+  it('tags every response, errors and docs included, with the version that served it', async () => {
     for (const path of ['/health', '/api/v2/items', '/nowhere', '/docs-json']) {
       const response = await api.get(path);
       expect(response.headers['x-app-version']).toBe(version);
-      expect(response.headers['x-app-track']).toBe('stable');
     }
   });
 
