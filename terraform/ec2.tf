@@ -130,7 +130,7 @@ locals {
 # One Kubernetes node: k3s on a single machine, behind the load balancer.
 resource "aws_instance" "node" {
   ami                    = data.aws_ami.al2023.id
-  instance_type          = "t3.medium"
+  instance_type          = "c7i-flex.large" # 2 vCPU, 4 GB: room for k3s, and eligible for the free plan
   availability_zone      = "${var.region}a"
   vpc_security_group_ids = [aws_security_group.api.id]
   iam_instance_profile   = aws_iam_instance_profile.api.name
