@@ -1,8 +1,10 @@
-import { Controller, Get, Headers, Param, ParseIntPipe, Query } from '@nestjs/common';
+import { Controller, Get, Headers, Param, ParseIntPipe, Query, Req } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Request } from 'express';
 import { createHash } from 'node:crypto';
 import { CacheService, ITEMS_NAMESPACE } from '../cache/cache.service';
 import { CORRELATION_HEADER } from '../common/correlation';
+import { PARTNER_FAULT_DELAY_MS, requestedFault } from '../common/fault';
 import { Paginated } from '../common/pagination';
 import { Item } from '../entities/item.entity';
 import { PartnerLookup } from '../interop/interop.contract';
@@ -65,18 +67,22 @@ export class ItemsV2Controller extends ItemsControllerBase {
   @ApiOperation({
     summary: 'Get one item, together with a record from the other cloud',
     description:
-      'The item is read locally. `partner` is fetched through the orchestrator ' +
+      'The item is read locally. `partner` is fetched from the partner API ' +
       'and is never allowed to hold up or break this response: if the other ' +
       'cloud does not answer in time, it comes back as `unavailable`.',
   })
   @ApiResponse({ status: 200, type: ItemWithPartner })
   override async findOne(
     @Param('id', ParseIntPipe) id: number,
+    // Optional only so the override keeps the base signature; Nest always passes it.
+    @Req() request?: Request,
     @Headers(CORRELATION_HEADER) correlationId?: string,
   ): Promise<ItemWithPartner> {
     // Local first: an unknown id 404s without calling the other cloud.
     const item = await this.service.findOne(id);
-    const partner = await this.interop.fetchPartnerRecord(correlationId);
+    const delay =
+      request && requestedFault(request) === 'partner-latency' ? PARTNER_FAULT_DELAY_MS : 0;
+    const partner = await this.interop.fetchPartnerRecord(correlationId, delay);
 
     return Object.assign(item, { partner });
   }

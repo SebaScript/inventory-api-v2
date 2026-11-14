@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { Repository } from 'typeorm';
 import { CacheService, PARTNER_NAMESPACE } from '../cache/cache.service';
 import { CORRELATION_HEADER } from '../common/correlation';
 import { Item, ItemStatus } from '../entities/item.entity';
+import { recordPartnerCall } from '../metrics/partner-calls';
 import { partnerLookups } from '../metrics/registry';
 import { ObjectStorageService } from '../storage/object-storage.service';
 import {
@@ -56,9 +58,9 @@ export class InteropService {
   /**
    * A record from the other cloud, through the cache. Never throws: a failure
    * degrades to `unavailable`. Only successes are cached, so an outage does not
-   * outlive itself.
+   * outlive itself. `delayMs` is the injected fault: the call leaves late.
    */
-  async fetchPartnerRecord(correlationId?: string): Promise<PartnerLookup> {
+  async fetchPartnerRecord(correlationId?: string, delayMs = 0): Promise<PartnerLookup> {
     if (!this.partnerConfigured) return { status: 'disabled', record: null };
 
     const partner = process.env.PARTNER_KEY!;
@@ -78,11 +80,12 @@ export class InteropService {
       headers['x-api-key'] = process.env.ORCHESTRATOR_API_KEY;
     }
 
+    const started = performance.now();
+    const signal = AbortSignal.timeout(timeout);
     try {
-      const response = await fetch(url, {
-        headers,
-        signal: AbortSignal.timeout(timeout),
-      });
+      // The delay counts against the same timeout, as a slow network would.
+      if (delayMs > 0) await sleep(delayMs, undefined, { signal });
+      const response = await fetch(url, { headers, signal });
 
       if (!response.ok) {
         return this.unavailable(`orchestrator answered ${response.status}`, correlationId);
@@ -100,6 +103,8 @@ export class InteropService {
       return { status: 'ok', record };
     } catch (error) {
       return this.unavailable((error as Error).message, correlationId);
+    } finally {
+      recordPartnerCall(performance.now() - started);
     }
   }
 

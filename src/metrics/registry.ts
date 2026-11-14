@@ -37,13 +37,13 @@ export const cacheMisses = new Counter({
 
 export const partnerLookups = new Counter({
   name: 'partner_lookups_total',
-  help: 'Calls to the other cloud through the orchestrator, by outcome',
+  help: 'Calls to the partner API in the other cloud, by outcome',
   labelNames: ['outcome'] as const,
   registers: [registry],
 });
 
 export const movementsRecorded = new Counter({
   name: 'movements_recorded_total',
-  help: 'Stock movements recorded: the business metric each track is compared on',
+  help: 'Stock movements recorded: the business metric',
   registers: [registry],
 });
