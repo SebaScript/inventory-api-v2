@@ -7,26 +7,25 @@ output "ecr_repository_url" {
 }
 
 output "dashboard_url" {
-  value = "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards/dashboard/${aws_cloudwatch_dashboard.canary.dashboard_name}"
+  value = "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards/dashboard/${aws_cloudwatch_dashboard.chaos.dashboard_name}"
 }
 
-# What the canary pipeline reads back: each apply must repeat the images and weight already running.
-output "stable_image_tag" {
-  value = var.stable_image_tag
+output "image_tag" {
+  value = var.image_tag
 }
 
-output "canary_image_tag" {
-  value = var.canary_image_tag
+output "node_id" {
+  description = "The Kubernetes node: kubectl runs on it through SSM"
+  value       = aws_instance.node.id
 }
 
-output "canary_weight" {
-  value = var.canary_weight
+output "fis_template_id" {
+  description = "Fault (a). Empty until the partner's URL is known"
+  value       = try(aws_fis_experiment_template.partner_latency[0].id, "")
 }
 
-output "canary_gate" {
-  value = {
-    load_balancer = aws_lb.api.arn_suffix
-    target_groups = { for track, group in aws_lb_target_group.api : track => { arn = group.arn, suffix = group.arn_suffix } }
-    alarms        = [aws_cloudwatch_metric_alarm.canary_errors.alarm_name, aws_cloudwatch_metric_alarm.canary_latency.alarm_name]
-  }
+output "fault_token" {
+  description = "What a request needs to trip the fault switch"
+  value       = random_password.fault_token.result
+  sensitive   = true
 }

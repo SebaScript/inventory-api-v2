@@ -1,71 +1,62 @@
-# The thresholds live in one versioned file: the alarms here and the pipeline gate both read it.
+# The thresholds live in one versioned file: the abort alarm here and the experiments both read it.
 locals {
-  slo    = jsondecode(file("${path.module}/../canary/slo.json"))
-  colors = { stable = "#2ca02c", canary = "#ff7f0e" }
+  slo     = jsondecode(file("${path.module}/../chaos/slo.json"))
+  alb     = ["TargetGroup", aws_lb_target_group.api.arn_suffix, "LoadBalancer", aws_lb.api.arn_suffix]
+  search  = "SEARCH('{${var.project},%s} MetricName=\"%s\"', '%s', 60)"
+  palette = { main = "#1f77b4", bad = "#d62728", fault = "#ff7f0e", good = "#2ca02c" }
 
-  alb_dimensions = {
-    for track, group in aws_lb_target_group.api :
-    track => ["TargetGroup", group.arn_suffix, "LoadBalancer", aws_lb.api.arn_suffix]
-  }
-
-  # One line per track, so every widget compares stable and canary side by side.
-  per_track = {
-    for track in keys(local.tracks) : track => {
-      requests = concat(["AWS/ApplicationELB", "RequestCount"], local.alb_dimensions[track])
-      errors   = concat(["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count"], local.alb_dimensions[track])
-      rejected = concat(["AWS/ApplicationELB", "HTTPCode_Target_4XX_Count"], local.alb_dimensions[track])
-      latency  = concat(["AWS/ApplicationELB", "TargetResponseTime"], local.alb_dimensions[track])
-      cpu      = ["AWS/EC2", "CPUUtilization", "InstanceId", aws_instance.api[track].id]
-      memory   = [var.project, "MemoryUsedMB", "Track", track]
-      business = [var.project, "MovementsRecorded", "Track", track]
-    }
-  }
-
-  # concat(...) and not flatten(): flatten would also break each metric into loose strings.
-  rate_lines = {
-    for kind in ["errors", "rejected"] : kind => concat([
-      for track, m in local.per_track : [
-        concat(m.requests, [{ id = "r_${track}", stat = "Sum", visible = false }]),
-        concat(m[kind], [{ id = "e_${track}", stat = "Sum", visible = false }]),
-        [{ expression = "100 * FILL(e_${track}, 0) / r_${track}", label = track, color = local.colors[track] }],
-      ]
-    ]...)
-  }
-
+  # Every widget shares the time axis, so a fault window lines up with what it caused.
   widgets = [
-    ["Traffic (requests per minute)", [for track, m in local.per_track : concat(m.requests, [{ stat = "Sum", label = track, color = local.colors[track] }])]],
-    ["Canary share of traffic (%)", [
-      concat(local.per_track.stable.requests, [{ id = "s", stat = "Sum", visible = false }]),
-      concat(local.per_track.canary.requests, [{ id = "c", stat = "Sum", visible = false }]),
-      [{ expression = "100 * FILL(c, 0) / (FILL(s, 0) + FILL(c, 0))", label = "canary %", color = local.colors.canary }],
+    ["Flow latency (seconds): the metric of fault (a)", [
+      concat(["AWS/ApplicationELB", "TargetResponseTime"], local.alb, [{ stat = "p95", label = "p95", color = local.palette.main }]),
+      concat(["AWS/ApplicationELB", "TargetResponseTime"], local.alb, [{ stat = "p50", label = "p50", color = local.palette.good }]),
     ]],
-    ["5xx error rate (%)", local.rate_lines.errors],
-    ["4xx error rate (%)", local.rate_lines.rejected],
-    ["Latency p50 / p95 / p99 (seconds)", concat([
-      for track, m in local.per_track : [
-        for p in ["p50", "p95", "p99"] : concat(m.latency, [{ stat = p, label = "${track} ${p}", color = local.colors[track] }])
-      ]
-    ]...)],
-    ["CPU (%)", [for track, m in local.per_track : concat(m.cpu, [{ stat = "Average", label = track, color = local.colors[track] }])]],
-    ["Memory (MB)", [for track, m in local.per_track : concat(m.memory, [{ stat = "Average", label = track, color = local.colors[track] }])]],
-    ["Movements recorded per minute (business)", [for track, m in local.per_track : concat(m.business, [{ stat = "Sum", label = track, color = local.colors[track] }])]],
+    ["Fault window: an experiment is injecting", [
+      [{ id = "fault", expression = format(local.search, "Experiment", "ChaosFaultActive", "Maximum"), label = "", color = local.palette.fault }],
+    ]],
+    ["Calls to the partner API by outcome: the metric of fault (b)", [
+      [{ id = "outcomes", expression = format(local.search, "Outcome", "PartnerCalls", "Sum"), label = "" }],
+    ]],
+    ["Partner call duration (ms)", [
+      [var.project, "PartnerCallDuration", { stat = "p95", label = "p95", color = local.palette.fault }],
+      [var.project, "PartnerCallDuration", { stat = "p50", label = "p50", color = local.palette.good }],
+    ]],
+    ["Requests and server errors per minute", [
+      concat(["AWS/ApplicationELB", "RequestCount"], local.alb, [{ stat = "Sum", label = "requests", color = local.palette.main }]),
+      concat(["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count"], local.alb, [{ stat = "Sum", label = "5xx from the API", color = local.palette.bad }]),
+      ["AWS/ApplicationELB", "HTTPCode_ELB_5XX_Count", "LoadBalancer", aws_lb.api.arn_suffix, { stat = "Sum", label = "5xx from the ALB", color = local.palette.fault }],
+    ]],
+    ["Healthy pods behind the load balancer", [
+      concat(["AWS/ApplicationELB", "HealthyHostCount"], local.alb, [{ stat = "Minimum", label = "healthy node", color = local.palette.good }]),
+    ]],
+    ["Node CPU (%)", [
+      ["AWS/EC2", "CPUUtilization", "InstanceId", aws_instance.node.id, { stat = "Average", label = "node", color = local.palette.main }],
+    ]],
+    ["Movements recorded per minute (business)", [
+      [var.project, "MovementsRecorded", { stat = "Sum", label = "movements", color = local.palette.main }],
+    ]],
   ]
 }
 
-# Detection: either alarm firing during a stage makes the pipeline send every request back to stable.
-# FILL(..., 0): a minute without canary traffic counts as healthy. Without it, an alarm with no new
-# data keeps looking back at the minutes that broke it, and never clears after a rollback.
-resource "aws_cloudwatch_metric_alarm" "canary_errors" {
-  alarm_name          = "${var.project}-canary-errors"
-  alarm_description   = "Canary 5xx rate above the abort threshold in canary/slo.json"
+# Where Fluent Bit puts the pods' logs: JSON lines, searchable by correlationId and traceId.
+resource "aws_cloudwatch_log_group" "app" {
+  name              = "/${var.project}/app"
+  retention_in_days = 7
+}
+
+# The abort condition: the flow failing for real. FIS stops its experiment when this fires, and so
+# does the Chaos Toolkit safeguard. FILL(..., 0): a quiet minute counts as healthy, so it clears.
+resource "aws_cloudwatch_metric_alarm" "flow_errors" {
+  alarm_name          = "${var.project}-flow-errors"
+  alarm_description   = "5xx rate of the API above chaos/slo.json abort.flowErrorRate: stop the experiment"
   comparison_operator = "GreaterThanThreshold"
-  threshold           = local.slo.objectives.errorRate.abort * 100
+  threshold           = local.slo.abort.flowErrorRate * 100
   evaluation_periods  = 3
   datapoints_to_alarm = 2
 
   metric_query {
     id          = "rate"
-    expression  = "IF(served >= 30, 100 * FILL(errors, 0) / served, 0)"
+    expression  = "IF(served >= 30, 100 * (FILL(target, 0) + FILL(balancer, 0)) / served, 0)"
     return_data = true
   }
   metric_query {
@@ -79,47 +70,32 @@ resource "aws_cloudwatch_metric_alarm" "canary_errors" {
       metric_name = "RequestCount"
       stat        = "Sum"
       period      = 60
-      dimensions  = { TargetGroup = aws_lb_target_group.api["canary"].arn_suffix, LoadBalancer = aws_lb.api.arn_suffix }
+      dimensions  = { TargetGroup = aws_lb_target_group.api.arn_suffix, LoadBalancer = aws_lb.api.arn_suffix }
     }
   }
   metric_query {
-    id = "errors"
+    id = "target"
     metric {
       namespace   = "AWS/ApplicationELB"
       metric_name = "HTTPCode_Target_5XX_Count"
       stat        = "Sum"
       period      = 60
-      dimensions  = { TargetGroup = aws_lb_target_group.api["canary"].arn_suffix, LoadBalancer = aws_lb.api.arn_suffix }
+      dimensions  = { TargetGroup = aws_lb_target_group.api.arn_suffix, LoadBalancer = aws_lb.api.arn_suffix }
     }
   }
-}
-
-resource "aws_cloudwatch_metric_alarm" "canary_latency" {
-  alarm_name          = "${var.project}-canary-latency"
-  alarm_description   = "Canary p95 latency above the abort threshold in canary/slo.json"
-  comparison_operator = "GreaterThanThreshold"
-  threshold           = local.slo.objectives.p95LatencyMs.abort / 1000
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
-
   metric_query {
-    id          = "latency"
-    expression  = "FILL(p95, 0)"
-    return_data = true
-  }
-  metric_query {
-    id = "p95"
+    id = "balancer"
     metric {
       namespace   = "AWS/ApplicationELB"
-      metric_name = "TargetResponseTime"
-      stat        = "p95"
+      metric_name = "HTTPCode_ELB_5XX_Count"
+      stat        = "Sum"
       period      = 60
-      dimensions  = { TargetGroup = aws_lb_target_group.api["canary"].arn_suffix, LoadBalancer = aws_lb.api.arn_suffix }
+      dimensions  = { LoadBalancer = aws_lb.api.arn_suffix }
     }
   }
 }
 
-resource "aws_cloudwatch_dashboard" "canary" {
+resource "aws_cloudwatch_dashboard" "chaos" {
   dashboard_name = var.project
   dashboard_body = jsonencode({
     widgets = concat(
@@ -145,8 +121,8 @@ resource "aws_cloudwatch_dashboard" "canary" {
         width  = 24
         height = 3
         properties = {
-          title  = "Automatic abort: either alarm in ALARM sends all traffic back to stable"
-          alarms = [aws_cloudwatch_metric_alarm.canary_errors.arn, aws_cloudwatch_metric_alarm.canary_latency.arn]
+          title  = "Abort condition: in ALARM, FIS and the experiments stop injecting"
+          alarms = [aws_cloudwatch_metric_alarm.flow_errors.arn]
         }
       }],
     )
