@@ -21,158 +21,59 @@ a database holding real data. Production turns it off: see
 [Expand / Contract](#expand--contract). `SEED=true` loads demo data, and the
 application refuses to seed whenever `NODE_ENV=production`.
 
-## Canary deployment
+## Chaos engineering
 
-A new version reaches production next to the current one and earns its traffic in
-stages. If it fails a stage, every request goes back to the stable version on its
-own.
+The API runs on Kubernetes and coordinates a synchronous flow across two clouds:
+`GET /v2/items/:id` reads an item here and fetches a record from the partner API in
+Google Cloud, carrying the correlation id and the W3C `traceparent` with it. Three
+faults are injected into that flow, each as a versioned experiment with a falsifiable
+hypothesis, and one of them runs in the pipeline as a quality gate.
 
-```mermaid
-flowchart LR
-  client([Clients]) -- ":80" --> alb
-
-  subgraph AWS["AWS us-east-1"]
-    alb["Application Load Balancer<br/>listener :80"]
-    tgs["Target group stable"]
-    tgc["Target group canary"]
-    ec2s["EC2 stable<br/>3.1.0 · APP_TRACK=stable"]
-    ec2c["EC2 canary<br/>4.0.0 · APP_TRACK=canary"]
-    rds[("RDS PostgreSQL<br/>one schema, the same for both")]
-    cw["CloudWatch<br/>dashboard · 2 alarms"]
-
-    alb -- "weight 100 - w" --> tgs --> ec2s
-    alb -- "weight w" --> tgc --> ec2c
-    alb -- "rule: x-canary: true" --> tgc
-    ec2s & ec2c --> rds
-    alb -. "requests, 4xx, 5xx, latency per target group" .-> cw
-    ec2s & ec2c -. "CPU, memory, movements" .-> cw
-  end
-
-  gh["GitHub Actions · Canary"] -- "terraform apply -var canary_weight=w" --> alb
-  gh -- "load, then gate: canary/slo.json" --> cw
-```
-
-| | |
-| --- | --- |
-| Provider | AWS (`us-east-1`), everything in [`terraform/`](terraform/README.md) |
-| Routing | The ALB listener forwards to two target groups by weight. A rule ahead of it sends any request with `x-canary: true` to the canary, whatever the weight |
-| Artifact | One Docker image per commit in ECR, tagged with the commit SHA. Tags are immutable: a tag always names the same image |
-| Who answered | Every response, errors and docs included, carries `X-App-Version` (from `package.json`) and `X-App-Track` (`stable` or `canary`) |
-
-### Two API versions in production
-
-| | stable track | canary track |
-| --- | --- | --- |
-| Release | 3.1.0 | 4.0.0 |
-| `/api/v2/...` | yes | yes, the same answers |
-| `/api/v3/...` | no | yes: each item carries `stockValue`, what its stock is worth |
-| `/api/...` without a version | served as v2 | served as v3 |
-
-`/api/...` without a version serves the newest version the build has, so the same
-URL answers v2 or v3 depending on where the split sends it. Before promotion,
-`/api/v3/...` is reached with `x-canary: true`.
-
-### Stages
-
-| Stage | Canary share | How traffic gets there | Observation | Decided by |
+| Owner | Fault | Injection | Target metric (k6) | Resilience patterns |
 | --- | --- | --- | --- | --- |
-| 0 | 0% of the public | Only requests with `x-canary: true` | Until the canary target is healthy, then a smoke test of each track | Health check and headers |
-| 1 | 10% | ALB weights 90 / 10 | 3 min under 25 req/s: about 450 canary requests | Alarms during the bake, then the gate |
-| 2 | 50% | ALB weights 50 / 50 | 3 min: about 2,250 canary requests | Same |
-| 3 | 100% | ALB weights 0 / 100 | 3 min: about 4,500 canary requests | Same, on objectives only: no baseline is left |
-| Promoted | 0% | Stable is rebuilt with the canary's image, then the weight returns to 0 | | |
+| Coordinator (AWS) | (a) +2 s on the call to the partner | AWS FIS, `AWSFIS-Run-Network-Latency-Sources` | p95 of `GET /v2/items/:id` | timeout per dependency, circuit breaker |
+| Coordinator (AWS) | (c) connection pool exhausted | own fault switch: `x-fault: slow-db` | p95 of `GET /items/:id` | bulkhead, query timeout |
+| Partner (GCP) | (b) partner database unreachable | partner's fault switch: `FAULT_DB` | share of the flow with `partner.status = ok` | database timeout, fallback cache |
 
-*Actions → Canary → Run workflow*:
+- **Load:** [`chaos/load.js`](chaos/load.js) is the only instrument, with the profile
+  fixed in [`chaos/slo.json`](chaos/slo.json): 30 s ramp to 20 requests per second,
+  150 s plateau, 15 s ramp down. Half the requests are the flow, half plain reads.
+- **Experiments:** [`chaos/experiments/`](chaos/experiments/) holds one Chaos Toolkit
+  file per fault. Its `chaos-card` extension states the steady state, the hypothesis,
+  the injection, the blast radius, the duration, the abort conditions and the
+  rollback. Chaos Toolkit checks the steady state with k6, injects, checks it again
+  while the fault is active, and always runs the rollback.
+- **Fault switch:** `x-fault: error | latency | slow-db | partner-latency`, honoured
+  only with the matching `x-fault-token`. Without `FAULT_TOKEN` set, nothing can be
+  injected through the API.
+- **Chaos gate:** the `Chaos` workflow runs an experiment; `Infrastructure` calls it
+  after each deploy. A deviated experiment fails the pipeline and leaves the Chaos
+  Toolkit journal and the k6 summaries as artifacts.
+- **Dashboard:** CloudWatch `inventory-api`: flow latency, the fault window, calls to
+  the partner by outcome and their duration, errors, node CPU and the business metric.
+  Pod logs reach `/inventory-api/app` through Fluent Bit, traces reach Grafana Cloud
+  Tempo through OpenTelemetry.
 
-- **deploy**, run on the commit or tag to release: builds its image if needed and puts it on the canary at 0% (stage 0);
-- **promote**: walks stages 1 to 3. `fault` makes the load ask the canary to fail, to rehearse an abort; `bake_minutes` sets each observation;
-- **rollback**: 0% to the canary, at once.
-
-A weight change is one `terraform apply` of the listener and takes about ten
-seconds. The load in each stage comes from [`canary/load.ts`](canary/load.ts): a
-steady, open-loop mix of reads and stock movements, the same for both tracks, that
-counts who answered each request. Run it from anywhere to see the split:
-
-```bash
-npx ts-node canary/load.ts --url http://<alb> --seconds 60 --rps 20
-```
-
-Sticky sessions are off: each request is routed on its own, which keeps the split
-exact, and one client may see v2 and then v3 on `/api/...`. Target-group stickiness
-on the listener would pin each client to one track, at the cost of a coarser split.
-
-### Promote, pause or abort: `canary/slo.json`
-
-The thresholds are versioned with the code. Terraform builds the alarms from them,
-and [`canary/gate.ts`](canary/gate.ts) judges each stage with them, from what
-CloudWatch measured on each target group during the bake.
-
-| Signal | Pause above | Abort above |
-| --- | --- | --- |
-| Canary 5xx rate | 1% | 5% |
-| Canary 4xx rate | 5% | 15% |
-| Canary p95 latency | 400 ms | 1,000 ms |
-| Canary 5xx rate minus stable's | 1 point | 3 points |
-| Canary p95 minus stable's | 100 ms | 300 ms |
-
-- **Abort** if any signal crosses its abort line, or if either alarm fires: the canary drops to 0% and the run fails.
-- **Pause** if any crosses a pause line, or if the canary served fewer than **300 requests**: the weight stays and the run ends with a warning, for a person to promote or roll back.
-- **Promote** otherwise: on to the next stage.
-
-The comparison with stable covers the same minutes under the same load, so neither
-track is judged against a quieter hour. It applies only while stable still receives
-traffic: at 100% the canary is judged on its objectives alone.
-
-Why 300 requests: to know an error rate near the 5% abort line within ±2.5 points
-at 95% confidence takes n = 1.96² × 0.05 × 0.95 / 0.025² ≈ 292. At 25 req/s the
-canary gets that many within three minutes even at 10%.
-
-### Fault injection
-
-On the canary only, `x-fault: error` answers 500 and `x-fault: latency` answers
-1.5 s late. The stable track ignores the header, so the same request shows both:
-
-```bash
-curl -i -H "x-canary: true" -H "x-fault: error" http://<alb>/api/items   # 500, X-App-Track: canary
-curl -i -H "x-fault: error" http://<alb>/api/items                       # 200, X-App-Track: stable
-```
-
-The fault answers before any handler runs, so a failing canary writes nothing: the
-data stays intact through the abort.
-
-### Automatic abort
-
-Two CloudWatch alarms watch the canary's target group every minute:
-`inventory-api-canary-errors` (5xx rate above 5%, with at least 30 requests in the
-minute) and `inventory-api-canary-latency` (p95 above 1 s). Each fires on two
-breaching minutes out of three. While a stage bakes, the pipeline checks them every
-20 seconds; one firing ends the stage early and sets the weight back to 0. After the
-bake, the gate judges the whole window.
-
-### Dashboard
-
-`terraform output dashboard_url` opens it. Every widget draws stable in green and
-the canary in orange, side by side: requests per minute, the canary's share of
-traffic (the stages and the rollback show up as steps), 5xx and 4xx rates, latency
-p50/p95/p99, CPU, memory, and **movements recorded per minute**, the business
-metric. Below them, the state of both alarms. The ALB measures traffic, errors and
-latency per target group, EC2 reports CPU every minute, and the API itself
-publishes memory and movements, tagged with its track.
+**Kept and retired.** Kept from earlier deliveries: the load balancer, RDS, ECR, S3,
+CloudWatch and the `Infrastructure` workflow. Retired: the two-machine canary
+routing and its workflow (Kubernetes runs the API now), the orchestrator (the partner
+API serves `/interop/orders/random` itself), the EKS manifests, the queue and the
+distributed cache, none of which the synchronous flow needs.
 
 ### Expand / Contract
 
-Both tracks share one database and either may be rolled back at any moment, so v3
+Every release shares one database and may be rolled back at any moment, so v3
 changes what the API answers, never what the database holds.
 
 1. **Expand (4.0.0).** v3 is added next to v2. Its one change is `stockValue` on each
    item: `quantity × unitPrice`, computed as the response leaves and never stored. It
    reads the columns v2 reads, so the schema 3.1.0 built stays exactly as it is, and
    no migration runs.
-2. **Both versions run.** v2 answers exactly as before, on either track. A write
+2. **Both versions run.** v2 answers exactly as before. A write
    through v3 is a write to the same columns under the same rules, so v2 reads it at
    once; `stockValue` in a body is rejected, since nobody stores it. The cache gains no
    key and v3 writes invalidate v2's cached listings as v2 writes do. The API uses no queues.
-3. **Contract, later and never during a canary.** Once no client calls `/v2`, a later
+3. **Contract, later and never during a rollout.** Once no client calls `/v2`, a later
    major release may retire it. The release that adds v3 removes nothing.
 
 A rollback loses nothing: no column, row or cache entry exists that only v3
@@ -181,60 +82,46 @@ would need its own expand, a backfill, and both versions keeping it in step.
 
 What guards the shared database: production runs with `DB_SYNC=false`, and the
 schema is built from the entities only on an empty database, so no build ever
-reshapes a schema another build is running on. Both tracks boot at once on a new
+reshapes a schema another build is running on. Both replicas boot at once on a new
 database, so the seed step takes a PostgreSQL advisory lock: one builds and seeds,
 the other waits.
 
 ## Architecture
 
-Two APIs, two clouds, one orchestrator between them. Each API is deployed whole
-in its own provider and neither holds a copy of the other's data: a record from
-the other side is fetched over HTTP, in real time, through the orchestrator.
+Two APIs, two clouds. This API coordinates the flow; the partner's API answers it.
+Neither holds a copy of the other's data.
 
 ```mermaid
 flowchart LR
-  client([Client / Postman])
+  k6([k6, fixed load profile])
 
-  subgraph AWS["AWS &mdash; operated by SebaScript"]
-    gw[API Gateway REST<br/>TLS, API key, rate limit]
-    nlb[Internal NLB<br/>via VPC Link]
-    subgraph eks["EKS Auto Mode"]
-      pods[inventory-api<br/>2-6 replicas, HPA, PDB]
-      otel[OpenTelemetry<br/>Collector]
-      prom[Prometheus agent]
+  subgraph AWS["AWS: coordinator"]
+    alb[Application Load Balancer]
+    subgraph k3s["k3s on one EC2 node"]
+      pods[inventory-api<br/>2 replicas, probes, requests and limits]
+      fb[Fluent Bit]
     end
     rds[(RDS PostgreSQL)]
-    cache[(ElastiCache Valkey<br/>partner records, TTL 30 s)]
-    s3[(S3<br/>flow attachments, exports)]
-    cw[CloudWatch<br/>logs, Container Insights,<br/>X-Ray, Application Signals]
+    s3[(S3)]
+    cw[CloudWatch<br/>metrics, logs, alarm, dashboard]
+    fis[AWS FIS]
   end
 
-  subgraph GCP["Google Cloud &mdash; operated by the partner"]
-    orch[Orchestrator]
-    queue[["Pub/Sub topic + DLQ"]]
-    orders[orders-api]
+  subgraph GCP["Google Cloud: partner"]
+    orders[orders API]
+    odb[(its database)]
   end
 
-  subgraph GC["Grafana Cloud &mdash; this API's own stack"]
-    mimir[Prometheus metrics]
-    tempo[Tempo traces]
-    dash[Dashboard + alert]
-  end
+  tempo[Grafana Cloud Tempo]
 
-  client --> gw --> nlb --> pods
-  pods --> rds & cache & s3
-  pods -- "GET /interop/orders/random" --> orch
-  orch -- "GET /v2/interop/random<br/>POST /v2/interop/messages" --> gw
-  orch --> queue --> orders
-  pods -- OTLP --> otel
-  otel --> cw
-  otel --> tempo
-  pods -. logs .-> cw
-  prom -- "scrapes each pod" --> pods
-  prom -. "health check: /metrics/inventory" .-> orch
-  prom -- remote_write --> mimir
-  mimir & tempo --> dash
-  dash -. "reads logs via IAM role" .-> cw
+  k6 --> alb --> pods
+  pods --> rds & s3
+  pods -- "GET /interop/orders/random<br/>x-correlation-id, traceparent" --> orders --> odb
+  fis -. "(a) latency" .-> pods
+  pods -. metrics .-> cw
+  fb -. logs .-> cw
+  pods -. traces .-> tempo
+  orders -. traces .-> tempo
 ```
 
 ## API
@@ -387,8 +274,7 @@ container and its volume.
 | `test/app.spec.ts`           | Health check, OpenAPI document, release headers, the schema guard, demo data   |
 | `test/v2.spec.ts`            | The `/v2` surface, shared data, QUERY under v2, the Swagger tags               |
 | `test/v3.spec.ts`            | The stock value, v1 and v2 unchanged, the table v2 built left as it was        |
-| `test/canary.spec.ts`        | Fault injection on the canary only, the business metric                        |
-| `test/gate.spec.ts`          | Every promote, pause and abort decision of the canary gate                     |
+| `test/faults.spec.ts`        | The token-guarded fault switch, the business metric, the CloudWatch minute     |
 | `test/health.spec.ts`        | Liveness surviving a database outage while readiness fails                     |
 | `test/cache.spec.ts`         | Cache keys, the fallback with no cache server, invalidation                    |
 | `test/exports.spec.ts`       | CSV escaping, the metric document, the unconfigured export                     |
@@ -400,24 +286,28 @@ runs with nothing but PostgreSQL.
 
 ## Infrastructure as code
 
-[`terraform/`](terraform/README.md) creates six AWS services in one apply: a load
-balancer, two EC2 machines that run the API with Docker (stable and canary), an RDS
-database, an ECR registry, an S3 bucket and the CloudWatch dashboard and alarms. The
-`Infrastructure` workflow deploys it, installs the API, and destroys it on demand;
-the `Canary` workflow rolls a new version out on it.
+[`terraform/`](terraform/) creates everything in one apply: a load balancer, one EC2
+node running k3s, an RDS database, an ECR registry, an S3 bucket, the CloudWatch log
+group, dashboard and abort alarm, and the AWS FIS experiment template. The
+`Infrastructure` workflow builds the image, deploys it, smoke-tests it and runs the
+chaos gate; `destroy` removes it all.
 
-## Deploying to a cluster
+## Kubernetes
 
-`deploy/` holds the Kubernetes manifests: a Deployment with real probes, an
-internal load balancer, and a one-off Job that creates the schema and loads the
-demo data. Three optional features switch on through the environment:
+[`terraform/k8s/`](terraform/k8s/) holds what the node applies on first boot: a
+Deployment of two replicas with startup, liveness and readiness probes and CPU and
+memory requests and limits, a NodePort Service the load balancer reaches, and a
+Fluent Bit DaemonSet that ships the pods' logs. k3s holds no registry credentials:
+the node pulls the image with its own IAM role, and the pods never pull. A single
+node is the trade-off: two replicas survive a pod failure, not a machine failure.
 
 | Variable           | Off means                                         | On adds                                                   |
 | ------------------ | ------------------------------------------------- | --------------------------------------------------------- |
 | `DB_SSL`           | plaintext connection, as a local database expects | TLS, which a managed database requires                    |
 | `REDIS_URL`        | every listing reads the database                  | `GET /v2/items` served from a distributed cache           |
 | `S3_BUCKET`        | `POST /v2/exports/items` answers `503`            | a CSV snapshot in object storage, behind a presigned link |
-| `ORCHESTRATOR_URL` | `partner` reports `disabled`, nothing is called   | records fetched live from the other cloud                 |
+| `ORCHESTRATOR_URL` | `partner` reports `disabled`, nothing is called   | records fetched live from the partner API                 |
+| `FAULT_TOKEN`      | the fault switch ignores every request            | faults on demand, for the requests that carry the token   |
 
 Two probes rather than one, because they answer different questions.
 `/health/live` never touches the database: a liveness probe that does turns a
@@ -425,14 +315,7 @@ brief database outage into a restart of every replica. `/health/ready` does
 check it, and starts failing the moment the process is asked to shut down, so
 the load balancer stops sending it new work before the socket closes.
 
-`deploy/hpa.yaml` adds horizontal autoscaling on CPU, from 2 replicas to 6.
-The floor stays at 2 on purpose: an autoscaler allowed to reach one replica
-would quietly undo the redundancy it was added to protect. It needs
-metrics-server, which EKS Auto Mode does not ship. `deploy/load-test.yaml` is a four-minute burst from inside
-the cluster to watch it happen: measured, two replicas become six in under a
-minute, and go back to two five minutes after the load stops.
-
-## Behind a gateway or an orchestrator
+## Calling and being called across clouds
 
 The API is a well-behaved downstream service, and nothing below changes how it
 answers when it is called directly.
@@ -454,8 +337,7 @@ seconds cannot drown the real traffic.
 hands one record to whoever asks, in a deliberately domain-agnostic shape
 (`source`, `kind`, `id`, `label`, `attributes`, `retrievedAt`) so neither side
 has to model the other. And `GET /v2/items/:id` returns the item plus a
-`partner` block holding a record fetched from the other service through the
-orchestrator.
+`partner` block holding a record fetched live from the partner API.
 
 That lookup is never allowed to matter. It reports `ok`, `unavailable` or
 `disabled` rather than throwing, runs behind a short timeout, and happens only
@@ -465,8 +347,8 @@ else being called. Every failure mode is covered by a test, and with
 exactly as it always has. The unversioned `GET /items/:id` is untouched: this is
 the first real divergence the `/v2` surface was built for.
 
-**`POST /v2/interop/messages` is this API's step in the cross-cloud flow.** The
-orchestrator posts the message it is carrying; this API appends one of its items
+**`POST /v2/interop/messages` is this API's step in an asynchronous flow.** A
+caller posts the message it is carrying; this API appends one of its items
 to `entities`, writes the accumulated JSON to object storage under
 `flows/<correlation id>/`, and appends a presigned link to `attachments`.
 Everything else in the message comes back untouched, so no step can erase
@@ -477,9 +359,9 @@ still added and no file is written.
 **Logs and traces point at each other.** Every request log line carries the
 OpenTelemetry `traceId`, and every request span carries the correlation id as
 `app.correlation_id`. From a log line you reach its trace; from the id another
-cloud logged, you find the trace here. The SDK itself is injected by the
-cluster, not bundled: `@opentelemetry/api` is the only dependency, and with no
-SDK loaded both stamps are no-ops.
+cloud logged, you find the trace here. The SDK is loaded by configuration,
+not code (`NODE_OPTIONS=--require @opentelemetry/auto-instrumentations-node/register`),
+and with `OTEL_SDK_DISABLED=true` both stamps are no-ops.
 
 **Partner record is cached, and only when it is good.** A successful lookup is stored for `PARTNER_CACHE_TTL_SECONDS` (30 by default) in its own
 cache namespace, so a burst of reads is one cross-cloud call rather than one

@@ -1,49 +1,50 @@
 # Infrastructure with Terraform
 
-Six AWS services, created and destroyed with one command:
+Everything the API needs on AWS, created and destroyed with one command:
 
-| File            | Service        | What it is for                                                                 |
-| --------------- | -------------- | ------------------------------------------------------------------------------ |
-| `alb.tf`        | **ELB**        | The load balancer: the only public entrance, and where traffic is split        |
-| `ec2.tf`        | **EC2**        | One machine per track, stable and canary, each running its image with Docker   |
-| `rds.tf`        | **RDS**        | The PostgreSQL database both tracks share, reachable only from the machines    |
-| `ecr.tf`        | **ECR**        | The registry the pipeline pushes the API image to; a tag can never be reused  |
-| `s3.tf`         | **S3**         | The bucket where the API stores its CSV exports                                |
-| `cloudwatch.tf` | **CloudWatch** | The stable-vs-canary dashboard, and the two alarms that abort a rollout        |
+| File            | Service        | What it is for                                                                  |
+| --------------- | -------------- | ------------------------------------------------------------------------------- |
+| `alb.tf`        | **ELB**        | The load balancer: the only public entrance, forwarding to the node's NodePort  |
+| `ec2.tf`        | **EC2**        | One node running k3s, its IAM role, and the manifests it applies on first boot  |
+| `k8s/`          | **Kubernetes** | The Deployment (2 replicas, probes, requests and limits), Service and Fluent Bit |
+| `rds.tf`        | **RDS**        | The PostgreSQL database, reachable only from the node                           |
+| `ecr.tf`        | **ECR**        | The registry the pipeline pushes the API image to; a tag can never be reused   |
+| `s3.tf`         | **S3**         | The bucket where the API stores its exports and flow objects                    |
+| `cloudwatch.tf` | **CloudWatch** | The pods' log group, the chaos dashboard and the alarm that aborts experiments  |
+| `fis.tf`        | **FIS**        | The fault injection template for experiment (a), and the role it runs with      |
 
 `providers.tf`, `variables.tf` and `outputs.tf` hold the configuration, and
-`user-data.sh` is what each machine runs on its first boot: install Docker, prepare
-and seed the database, start the API on port 80.
+`user-data.sh` is what the node runs on its first boot: install k3s, pull the image
+with the node's role, and apply `k8s/`.
 
 ```
-                         ┌─ weight 100 - w ─► EC2 stable (image A) ─┐
-Internet ──:80──► ALB ───┤                                          ├──► RDS PostgreSQL
-                         └─ weight w ───────► EC2 canary (image B) ─┘    S3, CloudWatch
-                           x-canary: true ──► always the canary
+Internet ──:80──► ALB ──:30080──► k3s node ──► 2 × inventory-api ──► RDS PostgreSQL
+                                                     │                S3, CloudWatch
+                                                     └──► partner API (Google Cloud)
 ```
 
-Three variables drive a rollout: `stable_image_tag`, `canary_image_tag` and
-`canary_weight` (0 to 100). Changing the weight only touches the load balancer
-and takes seconds; changing an image replaces that track's machine.
+`image_tag` picks the image; changing it replaces the node, so every deploy starts
+from a clean machine. `partner_url`, `partner_api_key`, `otlp_endpoint` and
+`otlp_headers` come from repository secrets; left empty, the partner lookup and the
+traces are off, and the FIS template is not created.
 
 ## Deploy from the pipeline
 
 `.github/workflows/infrastructure.yml` deploys the infrastructure **and** installs
 the API on it. It runs on demand only, so nothing is created, or billed, by accident.
 
-1. Add two repository secrets (*Settings → Secrets and variables → Actions*):
-   `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+1. Add the repository secrets (*Settings → Secrets and variables → Actions*):
+   `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, and optionally `PARTNER_URL`,
+   `PARTNER_API_KEY`, `OTLP_ENDPOINT` and `OTLP_HEADERS`.
 2. *Actions → Infrastructure → Run workflow*, choose **apply**.
 
 It then:
 
 1. creates the S3 bucket for the Terraform state, if it does not exist;
 2. creates the ECR repository, builds the API image and pushes it, tagged with the commit;
-3. applies everything else, with that image on both tracks and no traffic to the canary;
-4. waits until each track answers `/health/ready` and writes the API URL in the run summary.
-
-From there, the `Canary` workflow moves a new version through the stages: see
-[Canary deployment](../README.md#canary-deployment).
+3. applies everything else with that image;
+4. waits until the API answers `/health/ready` and writes the URLs in the run summary;
+5. runs chaos experiment (a) as a quality gate, unless the run unticks `chaos_gate`.
 
 ## Destroy
 
