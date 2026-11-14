@@ -8,6 +8,10 @@ on:
         type: choice
         options: [apply, destroy]
         default: apply
+      chaos_gate:
+        description: apply only. Run chaos experiment (a) after deploying; the pipeline fails if the flow loses its p95
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -17,6 +21,13 @@ concurrency: infrastructure
 defaults:
   run:
     working-directory: terraform
+
+# The partner and the traces. Empty secrets switch them off; they never reach the logs.
+env:
+  TF_VAR_partner_url: ${{ secrets.PARTNER_URL }}
+  TF_VAR_partner_api_key: ${{ secrets.PARTNER_API_KEY }}
+  TF_VAR_otlp_endpoint: ${{ secrets.OTLP_ENDPOINT }}
+  TF_VAR_otlp_headers: ${{ secrets.OTLP_HEADERS }}
 
 jobs:
   terraform:
@@ -64,19 +75,26 @@ jobs:
             docker push "$IMAGE"
           fi
 
-      - name: Deploy the infrastructure, with this commit on both tracks and no canary traffic
+      - name: Deploy the infrastructure, with this commit's image on the cluster
         if: inputs.action == 'apply'
-        run: |
-          terraform apply -auto-approve -var="stable_image_tag=$GITHUB_SHA" \
-            -var="canary_image_tag=$GITHUB_SHA" -var="canary_weight=0"
+        run: terraform apply -auto-approve -var="image_tag=$GITHUB_SHA"
 
-      - name: Smoke test both tracks (the machines need a few minutes to boot and start the API)
+      - name: Smoke test (the node needs a few minutes to start k3s and both replicas)
         if: inputs.action == 'apply'
         run: |
           URL=$(terraform output -raw api_url)
-          for TRACK in stable canary; do
-            HEADER="x-canary: $([ "$TRACK" = canary ] && echo true || echo false)"
-            curl --fail --silent --show-error --connect-timeout 5 --retry 40 --retry-delay 10 \
-              --retry-all-errors -H "$HEADER" -D - -o /dev/null "$URL/health/ready" | grep -i "x-app-track: $TRACK"
-          done
-          echo "API: $URL/docs" >> "$GITHUB_STEP_SUMMARY"
+          curl --fail --silent --show-error --connect-timeout 5 --retry 60 --retry-delay 10 \
+            --retry-all-errors -D - -o /dev/null "$URL/health/ready" | grep -i "x-app-version"
+          {
+            echo "API: $URL/docs"
+            echo "Dashboard: $(terraform output -raw dashboard_url)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  chaos-gate:
+    needs: terraform
+    if: inputs.action == 'apply' && inputs.chaos_gate
+    uses: ./.github/workflows/chaos.yml
+    with:
+      experiment: a-partner-latency
+      round: gate
+    secrets: inherit

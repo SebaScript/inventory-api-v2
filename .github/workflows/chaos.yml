@@ -1,0 +1,105 @@
+name: Chaos
+
+on:
+  workflow_dispatch:
+    inputs:
+      experiment:
+        description: steady measures without a fault; the others inject one and test their hypothesis
+        type: choice
+        options: [a-partner-latency, c-db-pool, steady]
+        default: a-partner-latency
+      round:
+        description: Label for the evidence, e.g. 0 before the improvement and 1 after it
+        type: string
+        default: "0"
+  # The chaos gate: Infrastructure calls this after every deploy that asks for it.
+  workflow_call:
+    inputs:
+      experiment:
+        type: string
+        required: true
+      round:
+        type: string
+        default: gate
+
+permissions:
+  contents: read
+
+# Its own group: Infrastructure holds "infrastructure" while it calls this one.
+concurrency: chaos
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    env:
+      EXPERIMENT: ${{ inputs.experiment }}
+      ROUND: ${{ inputs.round }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+
+      - uses: grafana/setup-k6-action@v1
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Chaos Toolkit
+        run: pip install chaostoolkit==1.21.4 chaostoolkit-addons==0.12.0
+
+      - name: Read the target from the Terraform state
+        working-directory: terraform
+        run: |
+          BUCKET="inventory-api-tfstate-$(aws sts get-caller-identity --query Account --output text)"
+          terraform init -backend-config="bucket=$BUCKET" > /dev/null
+          TOKEN=$(terraform output -raw fault_token)
+          echo "::add-mask::$TOKEN"
+          {
+            echo "BASE_URL=$(terraform output -raw api_url)"
+            echo "FIS_TEMPLATE_ID=$(terraform output -raw fis_template_id)"
+            echo "FAULT_TOKEN=$TOKEN"
+          } >> "$GITHUB_ENV"
+
+      - name: Steady state, no fault
+        if: inputs.experiment == 'steady'
+        run: k6 run -e EXPERIMENT=steady -e BASE_URL="$BASE_URL" -e ROUND="$ROUND" chaos/load.js
+
+      # Deviated = the hypothesis was refuted while the fault was active: the gate fails, with the evidence.
+      - name: Run the experiment, then judge it
+        if: inputs.experiment != 'steady'
+        run: |
+          if [ "$EXPERIMENT" = a-partner-latency ] && [ -z "$FIS_TEMPLATE_ID" ]; then
+            echo "::error::No FIS template yet: set the PARTNER_URL secret and run Infrastructure apply"
+            exit 1
+          fi
+          JOURNAL="chaos/out/journal-$EXPERIMENT-r$ROUND.json"
+          CODE=0
+          chaos --no-log-file run --journal-path "$JOURNAL" "chaos/experiments/$EXPERIMENT.yaml" || CODE=$?
+
+          {
+            echo "### $EXPERIMENT, round $ROUND"
+            jq -r '"| Moment | What k6 measured | Within the hypothesis |", "|---|---|---|",
+              (.steady_states.before.probes[]? | "| before the fault | \(.output.stdout // "-" | gsub("\n"; " ")) | \(.tolerance_met) |"),
+              (.steady_states.after.probes[]? | "| during the fault | \(.output.stdout // "-" | gsub("\n"; " ")) | \(.tolerance_met) |"),
+              "", "**Status:** \(.status) · **deviated:** \(.deviated)"' "$JOURNAL"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          jq -e '.status == "completed" and (.deviated | not)' "$JOURNAL" > /dev/null || CODE=1
+          exit $CODE
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: chaos-${{ inputs.experiment }}-r${{ inputs.round }}
+          path: chaos/out/
