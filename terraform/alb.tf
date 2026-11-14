@@ -28,15 +28,13 @@ resource "aws_lb" "api" {
   subnets            = data.aws_subnets.default.ids
 }
 
-# One target group per track: the split is a weight between the two.
+# The node's NodePort: Kubernetes spreads each request over the two replicas.
 resource "aws_lb_target_group" "api" {
-  for_each = local.tracks
-
-  name                 = "${var.project}-${each.key}"
-  port                 = 80
+  name                 = var.project
+  port                 = local.node_port
   protocol             = "HTTP"
   vpc_id               = data.aws_vpc.default.id
-  deregistration_delay = 10 # a weight change takes seconds, not the default 5 minutes
+  deregistration_delay = 10
 
   health_check {
     path                = "/health/ready"
@@ -47,49 +45,17 @@ resource "aws_lb_target_group" "api" {
 }
 
 resource "aws_lb_target_group_attachment" "api" {
-  for_each = local.tracks
-
-  target_group_arn = aws_lb_target_group.api[each.key].arn
-  target_id        = aws_instance.api[each.key].id
+  target_group_arn = aws_lb_target_group.api.arn
+  target_id        = aws_instance.node.id
 }
 
-# The split: each public request goes to one track or the other, by weight.
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.api.arn
   port              = 80
   protocol          = "HTTP"
 
   default_action {
-    type = "forward"
-
-    forward {
-      target_group {
-        arn    = aws_lb_target_group.api["stable"].arn
-        weight = 100 - var.canary_weight
-      }
-
-      target_group {
-        arn    = aws_lb_target_group.api["canary"].arn
-        weight = var.canary_weight
-      }
-    }
-  }
-}
-
-# Stage 0: with this header a request reaches the canary, even at 0%.
-resource "aws_lb_listener_rule" "canary_header" {
-  listener_arn = aws_lb_listener.http.arn
-  priority     = 1
-
-  action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.api["canary"].arn
-  }
-
-  condition {
-    http_header {
-      http_header_name = "x-canary"
-      values           = ["true"]
-    }
+    target_group_arn = aws_lb_target_group.api.arn
   }
 }

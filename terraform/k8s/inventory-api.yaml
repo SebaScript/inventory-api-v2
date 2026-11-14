@@ -1,0 +1,137 @@
+# Rendered by Terraform (ec2.tf) and applied by k3s on the node's first boot.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inventory
+---
+# The only secrets: the database URL, the partner's API key, the fault switch token and the trace token.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: inventory-api
+  namespace: inventory
+type: Opaque
+stringData:
+  DATABASE_URL: ${jsonencode(database_url)}
+  ORCHESTRATOR_API_KEY: ${jsonencode(partner_token)}
+  FAULT_TOKEN: ${jsonencode(fault_token)}
+  OTEL_EXPORTER_OTLP_HEADERS: ${jsonencode(otlp_headers)}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inventory-api
+  namespace: inventory
+data:
+  NODE_ENV: production
+  DB_SYNC: "false"
+  DB_SSL: "true"
+  # Connections per replica, declared: the pool is what a slow report can exhaust.
+  DB_POOL_MAX: "5"
+  S3_BUCKET: ${jsonencode(bucket)}
+  AWS_REGION: ${jsonencode(region)}
+  CW_NAMESPACE: ${jsonencode(namespace)}
+  # The partner API, which serves /interop/{PARTNER_KEY}/random. Empty: the flow runs without it.
+  ORCHESTRATOR_URL: ${jsonencode(partner_url)}
+  PARTNER_KEY: ${jsonencode(partner_key)}
+  # Traces through OpenTelemetry, configured here and not in code. Off without an endpoint.
+  OTEL_SDK_DISABLED: ${jsonencode(otlp_endpoint == "" ? "true" : "false")}
+  OTEL_SERVICE_NAME: inventory-api
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${jsonencode(otlp_endpoint)}
+  OTEL_TRACES_EXPORTER: otlp
+  OTEL_METRICS_EXPORTER: none
+  OTEL_LOGS_EXPORTER: none
+  OTEL_NODE_ENABLED_INSTRUMENTATIONS: http,express,nestjs-core,pg,undici
+  NODE_OPTIONS: --require @opentelemetry/auto-instrumentations-node/register
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-api
+  namespace: inventory
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: inventory-api
+  template:
+    metadata:
+      labels:
+        app: inventory-api
+    spec:
+      # Room for the 5 s drain in HealthController.
+      terminationGracePeriodSeconds: 30
+      # Builds the schema and seeds an empty database; the advisory lock makes the other replica wait.
+      initContainers:
+        - name: seed
+          image: ${image}
+          imagePullPolicy: Never
+          command: [node, dist/database/seed.cli.js]
+          envFrom:
+            - configMapRef:
+                name: inventory-api
+            - secretRef:
+                name: inventory-api
+      containers:
+        - name: api
+          image: ${image}
+          # Pulled by the node with its own role at boot: k3s holds no registry credentials.
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: inventory-api
+            - secretRef:
+                name: inventory-api
+          # Up to 90 s to start before liveness takes over.
+          startupProbe:
+            httpGet: { path: /health/live, port: 3000 }
+            periodSeconds: 2
+            failureThreshold: 45
+          # Never touches the database: a database blip must not restart every pod.
+          livenessProbe:
+            httpGet: { path: /health/live, port: 3000 }
+            periodSeconds: 10
+            failureThreshold: 3
+          # Checks the database: a failing pod stops receiving traffic, without a restart.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 3000 }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          # The only writable path, since the filesystem is read only.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# The load balancer reaches the pods through this port on the node.
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-api
+  namespace: inventory
+spec:
+  type: NodePort
+  selector:
+    app: inventory-api
+  ports:
+    - port: 80
+      targetPort: 3000
+      nodePort: ${node_port}

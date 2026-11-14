@@ -8,33 +8,44 @@ variable "project" {
   default = "inventory-api"
 }
 
-variable "stable_image_tag" {
-  description = "Image the stable track runs. The pipeline sets it to a commit SHA."
+variable "image_tag" {
+  description = "Image the cluster runs. The pipeline sets it to a commit SHA."
   type        = string
   default     = "latest"
 }
 
-variable "canary_image_tag" {
-  description = "Image the canary track runs. The same as stable when no canary is in progress."
+# The partner API in the other cloud. Empty: the flow runs without it and the latency experiment is not created.
+variable "partner_url" {
+  description = "Base URL of the partner API, which serves /interop/{partner_key}/random"
   type        = string
-  default     = "latest"
+  default     = ""
 }
 
-variable "canary_weight" {
-  description = "Percentage of public traffic the canary receives."
-  type        = number
-  default     = 0
+variable "partner_key" {
+  type    = string
+  default = "orders"
+}
 
-  validation {
-    condition     = var.canary_weight >= 0 && var.canary_weight <= 100
-    error_message = "canary_weight is a percentage: 0 to 100."
-  }
+variable "partner_api_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
+# Traces to Grafana Cloud Tempo, shared with the partner. Empty: tracing is off.
+variable "otlp_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "otlp_headers" {
+  description = "Authorization=Basic <base64 of instance id:token>, with a token that can only write traces"
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 locals {
-  # One machine and one target group per track, each with its own image.
-  tracks = {
-    stable = var.stable_image_tag
-    canary = var.canary_image_tag
-  }
+  # The host the latency experiment slows down: the partner's, taken from its URL.
+  partner_host = var.partner_url == "" ? "" : regex("^https?://([^/:]+)", var.partner_url)[0]
 }
