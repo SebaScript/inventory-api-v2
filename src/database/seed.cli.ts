@@ -8,7 +8,7 @@ import { seed } from './seed';
 async function main(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
   const dataSource = app.get(DataSource);
-  // Both tracks boot at once on a new database: one builds and seeds, the other waits.
+  // Both replicas boot at once on a new database: one builds and seeds, the other waits.
   const lock = dataSource.createQueryRunner();
 
   try {

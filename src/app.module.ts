@@ -25,6 +25,8 @@ config({ quiet: true });
       url: process.env.DATABASE_URL,
       // RDS requires TLS. Never put `sslmode` in DATABASE_URL: it overrides this.
       ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+      // Connections per replica: declared, because the pool is what a slow report can exhaust.
+      poolSize: Number(process.env.DB_POOL_MAX ?? 10),
       entities: [Group, Item, Movement],
       // Schema from the entities, instead of migrations. Off in the cluster:
       // two replicas building it at once would race.
