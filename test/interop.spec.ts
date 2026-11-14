@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CacheRead, CacheService } from '../src/cache/cache.service';
 import { ObjectStorageService, StoredObject } from '../src/storage/object-storage.service';
+import { PARTNER_FAULT_DELAY_MS } from '../src/common/fault';
 import { createApp, reset } from './app.factory';
 
 describe('Interop with the other cloud', () => {
@@ -185,6 +186,26 @@ describe('Caching what the partner returns', () => {
     await api.get('/v2/items/1').expect(200);
 
     expect(calls).toBe(2);
+  });
+
+  it('cuts an injected delay at the timeout and degrades, instead of waiting it out', async () => {
+    process.env.FAULT_TOKEN = 'chaos';
+    process.env.INTEROP_TIMEOUT_MS = '200';
+    try {
+      const started = Date.now();
+      const res = await api
+        .get('/v2/items/1')
+        .set('x-fault', 'partner-latency')
+        .set('x-fault-token', 'chaos')
+        .expect(200);
+
+      expect(res.body.partner.status).toBe('unavailable');
+      expect(Date.now() - started).toBeLessThan(PARTNER_FAULT_DELAY_MS);
+      expect(calls).toBe(0);
+    } finally {
+      delete process.env.FAULT_TOKEN;
+      delete process.env.INTEROP_TIMEOUT_MS;
+    }
   });
 
   it('never caches a failure, so an outage does not outlive itself', async () => {
