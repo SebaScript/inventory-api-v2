@@ -109,6 +109,8 @@ spec:
               memory: 512Mi
           securityContext:
             runAsNonRoot: true
+            # The image's `node` user: numeric, or Kubernetes cannot verify it is not root.
+            runAsUser: 1000
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
