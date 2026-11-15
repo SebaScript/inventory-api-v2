@@ -38,7 +38,7 @@ resource "aws_iam_role_policy" "fis" {
 # Blast radius: that one node and that one destination. Rollback: FIS removes it when the action
 # ends or the experiment stops. Abort: the flow-errors alarm. Only exists once the partner is known.
 resource "aws_fis_experiment_template" "partner_latency" {
-  count = local.partner_host == "" ? 0 : 1
+  count = nonsensitive(var.partner_url == "") ? 0 : 1
 
   description = "Fault (a): 2 s of latency on the calls to the partner API"
   role_arn    = aws_iam_role.fis.arn

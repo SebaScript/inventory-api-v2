@@ -19,6 +19,7 @@ variable "partner_url" {
   description = "Base URL of the partner API, which serves /interop/{partner_key}/random"
   type        = string
   default     = ""
+  sensitive   = true # kept out of the public pipeline logs
 }
 
 variable "partner_key" {
