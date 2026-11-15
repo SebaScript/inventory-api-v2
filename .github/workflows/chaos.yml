@@ -63,10 +63,13 @@ jobs:
           BUCKET="inventory-api-tfstate-$(aws sts get-caller-identity --query Account --output text)"
           terraform init -backend-config="bucket=$BUCKET" > /dev/null
           TOKEN=$(terraform output -raw fault_token)
+          HOST=$(terraform output -raw partner_host)
           echo "::add-mask::$TOKEN"
+          [ -n "$HOST" ] && echo "::add-mask::$HOST"
           {
             echo "BASE_URL=$(terraform output -raw api_url)"
-            echo "FIS_TEMPLATE_ID=$(terraform output -raw fis_template_id)"
+            echo "NODE_ID=$(terraform output -raw node_id)"
+            echo "PARTNER_HOST=$HOST"
             echo "FAULT_TOKEN=$TOKEN"
           } >> "$GITHUB_ENV"
 
@@ -78,8 +81,8 @@ jobs:
       - name: Run the experiment, then judge it
         if: inputs.experiment != 'steady'
         run: |
-          if [ "$EXPERIMENT" = a-partner-latency ] && [ -z "$FIS_TEMPLATE_ID" ]; then
-            echo "::error::No FIS template yet: set the PARTNER_URL secret and run Infrastructure apply"
+          if [ "$EXPERIMENT" = a-partner-latency ] && [ -z "$PARTNER_HOST" ]; then
+            echo "::error::No partner yet: set the PARTNER_URL secret and run Infrastructure apply"
             exit 1
           fi
           JOURNAL="chaos/out/journal-$EXPERIMENT-r$ROUND.json"

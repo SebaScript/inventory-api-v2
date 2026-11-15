@@ -19,9 +19,10 @@ output "node_id" {
   value       = aws_instance.node.id
 }
 
-output "fis_template_id" {
-  description = "Fault (a). Empty until the partner's URL is known"
-  value       = try(aws_fis_experiment_template.partner_latency[0].id, "")
+output "partner_host" {
+  description = "The host fault (a) slows down, taken from the partner's URL. Empty without a partner"
+  value       = var.partner_url == "" ? "" : regex("^https?://([^/:]+)", var.partner_url)[0]
+  sensitive   = true
 }
 
 output "fault_token" {
