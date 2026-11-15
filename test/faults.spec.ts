@@ -1,6 +1,10 @@
 import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { FAULT_DELAY_MS, SLOW_QUERY_SECONDS } from '../src/common/fault';
+import { FAULT_DELAY_MS } from '../src/common/fault';
+import {
+  EXPORT_STATEMENT_TIMEOUT_MS,
+  MAX_CONCURRENT_EXPORTS,
+} from '../src/exports/exports.service';
 import {
   PARTNER_OUTCOMES,
   minuteMetrics,
@@ -63,15 +67,48 @@ describe('Fault switch', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(FAULT_DELAY_MS);
   });
 
-  it('makes a report hold its database connection, which is what exhausts the pool', async () => {
+  it('makes a report hold its connection, until the statement timeout gives it back', async () => {
     const started = Date.now();
-    await api
+    const res = await api
       .post('/v2/exports/items')
       .set('x-fault', 'slow-db')
       .set('x-fault-token', TOKEN)
-      .expect(201);
+      .expect(503);
 
-    expect(Date.now() - started).toBeGreaterThanOrEqual(SLOW_QUERY_SECONDS * 1000);
+    expect(res.body.code).toBe('EXPORT_TIMEOUT');
+    const took = Date.now() - started;
+    expect(took).toBeGreaterThanOrEqual(EXPORT_STATEMENT_TIMEOUT_MS);
+    expect(took).toBeLessThan(2 * EXPORT_STATEMENT_TIMEOUT_MS);
+  });
+
+  it('refuses at once the reports beyond the bulkhead, and the reads stay fast', async () => {
+    const rejected = async () =>
+      Number(/^exports_rejected_total\S* (\d+)/m.exec((await api.get('/metrics')).text)?.[1]);
+    const before = await rejected();
+    const slowReport = () =>
+      api.post('/v2/exports/items').set('x-fault', 'slow-db').set('x-fault-token', TOKEN);
+
+    // then(): supertest only sends a request once it is awaited.
+    const running = Array.from({ length: MAX_CONCURRENT_EXPORTS }, () =>
+      slowReport().then((r) => r),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const started = Date.now();
+    const extra = await slowReport();
+    const read = await api.get('/api/v2/items').expect(200);
+
+    expect(extra.status).toBe(503);
+    expect(extra.body.code).toBe('EXPORT_BUSY');
+    expect(read.body).toBeDefined();
+    expect(Date.now() - started).toBeLessThan(EXPORT_STATEMENT_TIMEOUT_MS / 2);
+    expect((await Promise.all(running)).map((r) => r.body.code)).toEqual(
+      Array(MAX_CONCURRENT_EXPORTS).fill('EXPORT_TIMEOUT'),
+    );
+    expect((await rejected()) - before).toBe(1);
+  });
+
+  it('runs a normal report as before', async () => {
+    await api.post('/v2/exports/items').expect(201);
   });
 
   it('ignores a fault it does not know', async () => {
@@ -110,6 +147,7 @@ describe('CloudWatch minute', () => {
 
     expect(data[0]).toMatchObject({ MetricName: 'MemoryUsedMB', Value: 64, Unit: 'Megabytes' });
     expect(data[1]).toMatchObject({ MetricName: 'MovementsRecorded', Value: 3 });
+    expect(data[2]).toMatchObject({ MetricName: 'ReportsRejected', Value: 0 });
     const outcomes = data.filter((d) => d.MetricName === 'PartnerCalls');
     expect(outcomes.map((d) => [d.Dimensions?.[0].Value, d.Value])).toEqual(
       PARTNER_OUTCOMES.map((o) => [o, o === 'ok' ? 5 : 0]),

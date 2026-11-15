@@ -47,3 +47,9 @@ export const movementsRecorded = new Counter({
   help: 'Stock movements recorded: the business metric',
   registers: [registry],
 });
+
+export const exportsRejected = new Counter({
+  name: 'exports_rejected_total',
+  help: 'Reports refused at once because the bulkhead was full',
+  registers: [registry],
+});

@@ -60,6 +60,26 @@ export class ExportUnavailableException extends ServiceUnavailableException {
   }
 }
 
+/** The bulkhead is full: refused at once, so the reads keep their connections. */
+export class ExportBusyException extends ServiceUnavailableException {
+  constructor(limit: number) {
+    super({
+      code: 'EXPORT_BUSY',
+      message: `${limit} report(s) are already running on this replica; try again in a few seconds`,
+    });
+  }
+}
+
+/** The report outran its statement timeout and gave its connection back. */
+export class ExportTimeoutException extends ServiceUnavailableException {
+  constructor(ms: number) {
+    super({
+      code: 'EXPORT_TIMEOUT',
+      message: `The report took longer than ${ms} ms and was cancelled; try again in a few seconds`,
+    });
+  }
+}
+
 export class InsufficientStockException extends ConflictException {
   constructor(itemId: number, available: number, requested: number) {
     super({
