@@ -31,7 +31,7 @@ hypothesis, and one of them runs in the pipeline as a quality gate.
 
 | Owner | Fault | Injection | Target metric (k6) | Resilience patterns |
 | --- | --- | --- | --- | --- |
-| Coordinator (AWS) | (a) +2 s on the call to the partner | AWS FIS, `AWSFIS-Run-Network-Latency-Sources` | p95 of `GET /v2/items/:id` | timeout per dependency, circuit breaker |
+| Coordinator (AWS) | (a) +2 s on the call to the partner | AWS document `AWSFIS-Run-Network-Latency-Sources`, sent through SSM | p95 of `GET /v2/items/:id` | timeout per dependency, circuit breaker |
 | Coordinator (AWS) | (c) connection pool exhausted | own fault switch: `x-fault: slow-db` | p95 of `GET /items/:id` | bulkhead, query timeout |
 | Partner (GCP) | (b) partner database unreachable | partner's fault switch: `FAULT_DB` | share of the flow with `partner.status = ok` | database timeout, fallback cache |
 
@@ -43,6 +43,10 @@ hypothesis, and one of them runs in the pipeline as a quality gate.
   the injection, the blast radius, the duration, the abort conditions and the
   rollback. Chaos Toolkit checks the steady state with k6, injects, checks it again
   while the fault is active, and always runs the rollback.
+- **Latency injection:** AWS FIS needs a paid account plan, so experiment (a) sends the
+  document FIS itself runs, `AWSFIS-Run-Network-Latency-Sources`, to the node through
+  Systems Manager. It removes the delay itself after five minutes or once cancelled, and
+  the rollback clears it at once.
 - **Fault switch:** `x-fault: error | latency | slow-db | partner-latency`, honoured
   only with the matching `x-fault-token`. Without `FAULT_TOKEN` set, nothing can be
   injected through the API.
@@ -104,7 +108,7 @@ flowchart LR
     rds[(RDS PostgreSQL)]
     s3[(S3)]
     cw[CloudWatch<br/>metrics, logs, alarm, dashboard]
-    fis[AWS FIS]
+    ssm[Systems Manager]
   end
 
   subgraph GCP["Google Cloud: partner"]
@@ -117,7 +121,7 @@ flowchart LR
   k6 --> alb --> pods
   pods --> rds & s3
   pods -- "GET /interop/orders/random<br/>x-correlation-id, traceparent" --> orders --> odb
-  fis -. "(a) latency" .-> pods
+  ssm -. "(a) latency" .-> pods
   pods -. metrics .-> cw
   fb -. logs .-> cw
   pods -. traces .-> tempo
@@ -288,7 +292,7 @@ runs with nothing but PostgreSQL.
 
 [`terraform/`](terraform/) creates everything in one apply: a load balancer, one EC2
 node running k3s, an RDS database, an ECR registry, an S3 bucket, the CloudWatch log
-group, dashboard and abort alarm, and the AWS FIS experiment template. The
+group, dashboard and abort alarm. The
 `Infrastructure` workflow builds the image, deploys it, smoke-tests it and runs the
 chaos gate; `destroy` removes it all.
 
