@@ -14,12 +14,15 @@ locals {
     ["Fault window: an experiment is injecting", [
       [{ id = "fault", expression = format(local.search, "Experiment", "ChaosFaultActive", "Maximum"), label = "", color = local.palette.fault }],
     ]],
-    ["Calls to the partner API by outcome: the metric of fault (b)", [
+    ["Calls to the partner API by outcome (short-circuited = circuit open): faults (a) and (b)", [
       [{ id = "outcomes", expression = format(local.search, "Outcome", "PartnerCalls", "Sum"), label = "" }],
     ]],
     ["Partner call duration (ms)", [
       [var.project, "PartnerCallDuration", { stat = "p95", label = "p95", color = local.palette.fault }],
       [var.project, "PartnerCallDuration", { stat = "p50", label = "p50", color = local.palette.good }],
+    ]],
+    ["Reports refused by the bulkhead: the pattern of fault (c)", [
+      [var.project, "ReportsRejected", { stat = "Sum", label = "refused", color = local.palette.fault }],
     ]],
     ["Requests and server errors per minute", [
       concat(["AWS/ApplicationELB", "RequestCount"], local.alb, [{ stat = "Sum", label = "requests", color = local.palette.main }]),
