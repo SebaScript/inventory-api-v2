@@ -50,7 +50,7 @@ resource "aws_iam_role_policy_attachment" "ecr" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
-# Systems Manager: how FIS injects the network latency, and how the pipeline runs kubectl on the node.
+# Systems Manager: how fault (a) injects the network latency, and how the pipeline runs kubectl on the node.
 resource "aws_iam_role_policy_attachment" "ssm" {
   role       = aws_iam_role.api.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"

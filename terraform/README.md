@@ -11,7 +11,6 @@ Everything the API needs on AWS, created and destroyed with one command:
 | `ecr.tf`        | **ECR**        | The registry the pipeline pushes the API image to; a tag can never be reused   |
 | `s3.tf`         | **S3**         | The bucket where the API stores its exports and flow objects                    |
 | `cloudwatch.tf` | **CloudWatch** | The pods' log group, the chaos dashboard and the alarm that aborts experiments  |
-| `fis.tf`        | **FIS**        | The fault injection template for experiment (a), and the role it runs with      |
 
 `providers.tf`, `variables.tf` and `outputs.tf` hold the configuration, and
 `user-data.sh` is what the node runs on its first boot: install k3s, pull the image
@@ -26,7 +25,7 @@ Internet ──:80──► ALB ──:30080──► k3s node ──► 2 × in
 `image_tag` picks the image; changing it replaces the node, so every deploy starts
 from a clean machine. `partner_url`, `partner_api_key`, `otlp_endpoint` and
 `otlp_headers` come from repository secrets; left empty, the partner lookup and the
-traces are off, and the FIS template is not created.
+traces are off.
 
 ## Deploy from the pipeline
 

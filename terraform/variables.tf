@@ -45,8 +45,3 @@ variable "otlp_headers" {
   default     = ""
   sensitive   = true
 }
-
-locals {
-  # The host the latency experiment slows down: the partner's, taken from its URL.
-  partner_host = var.partner_url == "" ? "" : regex("^https?://([^/:]+)", var.partner_url)[0]
-}

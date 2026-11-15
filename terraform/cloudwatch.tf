@@ -44,8 +44,8 @@ resource "aws_cloudwatch_log_group" "app" {
   retention_in_days = 7
 }
 
-# The abort condition: the flow failing for real. FIS stops its experiment when this fires, and so
-# does the Chaos Toolkit safeguard. FILL(..., 0): a quiet minute counts as healthy, so it clears.
+# The abort condition: the flow failing for real. The Chaos Toolkit safeguard stops the experiment
+# when this fires. FILL(..., 0): a quiet minute counts as healthy, so it clears.
 resource "aws_cloudwatch_metric_alarm" "flow_errors" {
   alarm_name          = "${var.project}-flow-errors"
   alarm_description   = "5xx rate of the API above chaos/slo.json abort.flowErrorRate: stop the experiment"
@@ -121,7 +121,7 @@ resource "aws_cloudwatch_dashboard" "chaos" {
         width  = 24
         height = 3
         properties = {
-          title  = "Abort condition: in ALARM, FIS and the experiments stop injecting"
+          title  = "Abort condition: in ALARM, the experiments stop injecting"
           alarms = [aws_cloudwatch_metric_alarm.flow_errors.arn]
         }
       }],
