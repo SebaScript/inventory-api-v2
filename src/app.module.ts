@@ -27,6 +27,8 @@ config({ quiet: true });
       ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
       // Connections per replica: declared, because the pool is what a slow report can exhaust.
       poolSize: Number(process.env.DB_POOL_MAX ?? 10),
+      // A request waits at most 2 s for a free connection, then fails instead of hanging.
+      extra: { connectionTimeoutMillis: 2_000 },
       entities: [Group, Item, Movement],
       // Schema from the entities, instead of migrations. Off in the cluster:
       // two replicas building it at once would race.
