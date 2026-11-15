@@ -8,6 +8,7 @@ import { CORRELATION_HEADER } from '../common/correlation';
 import { Item, ItemStatus } from '../entities/item.entity';
 import { recordPartnerCall } from '../metrics/partner-calls';
 import { partnerLookups } from '../metrics/registry';
+import { CircuitBreaker } from './circuit-breaker';
 import { ObjectStorageService } from '../storage/object-storage.service';
 import {
   FlowAttachment,
@@ -17,8 +18,15 @@ import {
   SERVICE_NAME,
 } from './interop.contract';
 
-/** Runs inside a GET: it must never hold the response. */
-const DEFAULT_TIMEOUT_MS = 1_500;
+/**
+ * Runs inside a GET: it must never hold the response. Above the partner's p99
+ * (it answers in about 100 ms) and under the flow's 500 ms objective.
+ */
+const DEFAULT_TIMEOUT_MS = 300;
+
+/** Five failures in a row open the circuit; the partner gets 30 s before a trial call. */
+const CIRCUIT_THRESHOLD = 5;
+const CIRCUIT_OPEN_MS = 30_000;
 
 /** Short: the partner returns a random record, so a long TTL would freeze one. */
 const DEFAULT_CACHE_TTL_SECONDS = 30;
@@ -26,6 +34,7 @@ const DEFAULT_CACHE_TTL_SECONDS = 30;
 @Injectable()
 export class InteropService {
   private readonly logger = new Logger('Interop');
+  readonly circuit = new CircuitBreaker(CIRCUIT_THRESHOLD, CIRCUIT_OPEN_MS);
 
   constructor(
     @InjectRepository(Item) private readonly items: Repository<Item>,
@@ -70,6 +79,12 @@ export class InteropService {
       return { status: 'ok', record: value };
     }
 
+    // Open circuit: degrade at once instead of waiting out the timeout again.
+    if (!this.circuit.allow()) {
+      partnerLookups.inc({ outcome: 'short-circuited' });
+      return { status: 'unavailable', record: null };
+    }
+
     const base = process.env.ORCHESTRATOR_URL!.replace(/\/$/, '');
     const url = `${base}/interop/${partner}/random`;
     const timeout = Number(process.env.INTEROP_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
@@ -99,6 +114,7 @@ export class InteropService {
       const ttl = Number(process.env.PARTNER_CACHE_TTL_SECONDS ?? DEFAULT_CACHE_TTL_SECONDS);
       await this.cache.write(PARTNER_NAMESPACE, partner, epoch, record, ttl);
 
+      this.circuit.succeeded();
       partnerLookups.inc({ outcome: 'ok' });
       return { status: 'ok', record };
     } catch (error) {
@@ -151,6 +167,13 @@ export class InteropService {
   private unavailable(reason: string, correlationId?: string): PartnerLookup {
     partnerLookups.inc({ outcome: 'unavailable' });
     this.logger.warn({ message: 'Partner lookup failed', reason, correlationId });
+    if (this.circuit.failed()) {
+      this.logger.warn({
+        message: 'Circuit opened: calls to the partner paused',
+        seconds: CIRCUIT_OPEN_MS / 1000,
+        correlationId,
+      });
+    }
     return { status: 'unavailable', record: null };
   }
 }

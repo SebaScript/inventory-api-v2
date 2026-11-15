@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { CacheRead, CacheService } from '../src/cache/cache.service';
 import { ObjectStorageService, StoredObject } from '../src/storage/object-storage.service';
 import { PARTNER_FAULT_DELAY_MS } from '../src/common/fault';
+import { InteropService } from '../src/interop/interop.service';
 import { createApp, reset } from './app.factory';
 
 describe('Interop with the other cloud', () => {
@@ -166,6 +167,7 @@ describe('Caching what the partner returns', () => {
     await api.post('/groups').send({ name: 'Electronics' }).expect(201);
     await api.post('/items').send({ groupId: 1, name: 'Cable', sku: 'C1' }).expect(201);
     await api.delete('/v2/interop/cache').expect(200);
+    app.get(InteropService).circuit.succeeded();
     calls = 0;
     answerWith(200, record);
   });
@@ -206,6 +208,21 @@ describe('Caching what the partner returns', () => {
       delete process.env.FAULT_TOKEN;
       delete process.env.INTEROP_TIMEOUT_MS;
     }
+  });
+
+  it('stops calling a partner that keeps failing, and answers degraded at once', async () => {
+    answerWith(503, {});
+
+    for (let i = 0; i < 5; i++) {
+      expect((await api.get('/v2/items/1').expect(200)).body.partner.status).toBe('unavailable');
+    }
+    const started = Date.now();
+    const res = await api.get('/v2/items/1').expect(200);
+
+    expect(res.body.partner.status).toBe('unavailable');
+    expect(calls).toBe(5);
+    expect(Date.now() - started).toBeLessThan(100);
+    expect(app.get(InteropService).circuit.state).toBe('open');
   });
 
   it('never caches a failure, so an outage does not outlive itself', async () => {
