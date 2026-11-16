@@ -6,8 +6,17 @@ sobre `v4.2.0` (controles como estaban), ronda 1 sobre `v4.3.0` (controles mejor
 A ejecuta y B analiza) y Exp 3 (telemetría e IA, B) · **Reglas de compromiso:**
 `security/RULES-OF-ENGAGEMENT.md`
 
-> Las celdas marcadas **(ronda pendiente)** se rellenan con el sello de tiempo real de cada
-> corrida de `gameday.yml`; la estructura, las hipótesis y los mecanismos ya están fijados.
+**Resultado medido (dos rondas con el mismo método, `gameday.yml`):**
+
+| Experimento | Métrica | Ronda 0 (v4.2.0) | Ronda 1 (v4.3.0) | Hipótesis |
+|---|---|---|---|---|
+| 1 Identidad de máquina | MTTD / MTTC | ∞ / ∞ | **4 s / 61 s** | Refutada en r0, se cumple en r1 |
+| 4 Resiliencia de datos | RPO / RTO | ∞ / ∞ | **1 s / 2 s** | Refutada en r0, se cumple en r1 |
+
+En la ronda 0 (controles como estaban) ninguno de los dos controles detecta ni recupera: las
+hipótesis se refutan, que es el objetivo del game day. En la ronda 1 (controles de v4.3.0) la
+credencial robada se bloquea y se detecta, y el dato borrado se recupera. Cada valor sale de una
+corrida real; los run IDs están en cada sección.
 
 ## 1. Inventario de controles y estado estable de seguridad
 
@@ -57,10 +66,15 @@ sobre el honeytoken. Marcado con `AWS_EXECUTION_ENV=gameday-exp1-r<ronda>` (qued
 
 | Momento | Ronda 0 (v4.2.0) | Ronda 1 (v4.3.0) |
 |---|---|---|
-| T0 — credencial robada y usada | GetObject **tiene éxito**: la credencial sirve fuera de AWS | GetObject sobre `flows/` → **AccessDenied** (bucket policy `aws:SourceVpce`) |
-| Detección (MTTD) | ∞ — nada lo registra a nivel de objeto | (ronda pendiente) — alerta en `/security/alerts` por la regla `node-role-outside-vpce` |
-| Lectura del honeytoken | se lee sin alerta | alerta por la regla `honeytoken-read` |
-| Contención (MTTC) | ∞ — la credencial sirve hasta caducar | (ronda pendiente) — `exp1-contain` revoca las sesiones |
+| T0 — credencial robada y usada | GetObject **tiene éxito**: la credencial sirve fuera de AWS (run 43798528174) | GetObject sobre `flows/` → **AccessDenied** por el deny explícito de la bucket policy `aws:SourceVpce` (run 43802363668) |
+| Detección (MTTD) | **∞** — nada lo registra a nivel de objeto | **4 s** — alerta en `/security/alerts` por la regla `node-role-outside-vpce` (acto 04:10:07Z → alerta 04:10:11Z) |
+| Lectura del honeytoken | se intenta sin alerta (el señuelo no existe aún) | **AccessDenied y aun así alerta** por la regla `honeytoken-read` (CloudTrail registra el intento denegado) |
+| Contención (MTTC) | **∞** — la credencial sirve hasta caducar | **61 s** — `exp1-contain` revoca las sesiones del rol (run 43802488476); el nodo recibe credenciales nuevas, sin drift |
+
+Medido: en la ronda 1 la credencial robada ya no sirve desde fuera (dos capas: la bucket policy la
+bloquea y la revocación la invalida), y el acceso queda detectado en 4 s. Las tres alertas de la
+ronda 1 (GetObject del objeto víctima y dos del honeytoken, todas `AccessDenied` por *resource-based
+policy*) están en `/security/alerts` con su `traceId` de CloudTrail.
 
 **Mejoras aplicadas (v4.3.0), dos propias de la capa:**
 
@@ -92,10 +106,13 @@ basura e intenta borrarlo; `step=exp4-restore` recupera la última versión buen
 
 | Métrica | Ronda 0 (v4.2.0) | Ronda 1 (v4.3.0) |
 |---|---|---|
-| Versiones conservadas tras el ataque | 1 (sin versionado): nada que recuperar | ≥ 2: la versión previa sobrevive |
-| Borrado del objeto | elimina el dato | crea un *delete marker*; la versión queda |
-| RPO | ∞ | (ronda pendiente) — tiempo desde la última escritura buena |
-| RTO | ∞ | (ronda pendiente) — lo mide `exp4-restore` |
+| Versiones conservadas tras el ataque | **0** (sin versionado): el borrado elimina el único dato (run 43798608890) | **2**: la escritura buena y la sobrescritura; la versión previa sobrevive (run 43802607351) |
+| Borrado del objeto | elimina el dato | crea un *delete marker*; las versiones quedan |
+| RPO | **∞** (nada que recuperar) | **1 s** — de la última escritura buena a la sobrescritura del ransomware |
+| RTO | **∞** | **2 s** — `exp4-restore` copia la versión buena a la actual (run 43802848069) |
+
+En la ronda 1, `exp4-restore` recuperó la versión buena (`wUNFakzD…`) en 2 s; el Object Lock
+(governance, 1 día) además impide borrar o sobrescribir esa versión dentro de la retención.
 
 **Mejoras aplicadas (v4.3.0):**
 
@@ -134,9 +151,16 @@ API real de AWS: positivo → `True`, negativo → `False` en las tres.
 
 **Cómo se mide.** MTTD = hora de la alerta − hora del primer acto (CloudTrail / log del workflow).
 MTTC = hora en que la credencial deja de servir − primer acto. Cobertura = técnicas detectadas /
-emuladas. **Falsos positivos:** k6 (`chaos/load.js`) corre en paralelo generando el tráfico normal
-del flujo; las reglas no deben dispararse con él (tasa base: si lo malicioso es rarísimo, pocos FP
-ahogan a los verdaderos).
+emuladas: en la ronda 1, las dos técnicas de A (T1552.005/T1078.004 y T1486/T1485) se detectaron →
+**100 %**.
+
+**Falsos positivos medidos: 0.** Durante las dos rondas, con el despliegue y los *smoke tests*
+generando tráfico normal de la app, `/security/alerts` recibió **14 eventos y los 14 son del game
+day** (honeytoken ×9, objeto víctima ×4, borrado de `flows/` ×1). El tráfico legítimo no dispara
+ninguna regla porque va por el endpoint de VPC (lleva `vpcEndpointId`) y no borra objetos `flows/`.
+La tasa base importa: una regla con muchos FP se ignora; aquí el honeytoken y el filtro por
+`vpcEndpointId` dan señal casi sin ruido. El caso negativo de cada regla
+(`security/detections/*.negative.json`) prueba lo mismo en CI antes de desplegar.
 
 ## 7. IA en la defensa (humano en el bucle) y tendencias
 
@@ -147,7 +171,8 @@ con la telemetría real:
 | Propuso | Acertó | Inventó / se descartó |
 |---|---|---|
 | Acotar la *bucket policy* al rol + `flows/` para no romper Terraform ni los prefirmados | Sí (el deny a `*` habría bloqueado el propio `apply`) | — |
-| (ronda pendiente: correlación de las alertas de las dos rondas) | | |
+| Diagnóstico de los fallos del game day como código: `--parameters` abreviado de SSM, `file://` con ruta Windows, `aws events test-event-pattern` para probar las reglas, paginación de `filter-log-events` que añadía `None` al MTTD | Sí, cada uno verificado con una corrida real | — |
+| Correlación de las alertas de la ronda 1: las tres `AccessDenied` son el mismo ataque (víctima + honeytoken), no tres incidentes | Sí (mismo `principalId` del rol, mismo minuto) | Descartado contar el honeytoken como incidente aparte |
 
 **Tendencias verificables, implementadas (no solo mencionadas):**
 
