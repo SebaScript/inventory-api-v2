@@ -1,0 +1,34 @@
+{
+  "version": "0",
+  "id": "test-negative",
+  "detail-type": "AWS API Call via CloudTrail",
+  "source": "aws.s3",
+  "account": "123456789012",
+  "time": "2026-11-18T22:00:00Z",
+  "region": "us-east-1",
+  "resources": [],
+  "detail": {
+    "eventSource": "s3.amazonaws.com",
+    "eventName": "GetObject",
+    "awsRegion": "us-east-1",
+    "sourceIPAddress": "10.0.3.14",
+    "userIdentity": {
+      "type": "AssumedRole",
+      "arn": "arn:aws:sts::123456789012:assumed-role/inventory-api-ec2/i-0a7defd5bdbd73a3a",
+      "sessionContext": {
+        "sessionIssuer": {
+          "type": "Role",
+          "userName": "inventory-api-ec2",
+          "arn": "arn:aws:iam::123456789012:role/inventory-api-ec2"
+        }
+      }
+    },
+    "additionalEventData": {
+      "vpcEndpointId": "vpce-0a1b2c3d4e5f6a7b8"
+    },
+    "requestParameters": {
+      "bucketName": "inventory-api-exports-123456789012",
+      "key": "flows/3f2c9a1e/2026-11-18T21-00-00.000Z-inventory-api.json"
+    }
+  }
+}

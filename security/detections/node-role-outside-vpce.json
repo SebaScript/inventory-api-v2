@@ -1,0 +1,19 @@
+{
+  "source": ["aws.s3"],
+  "detail-type": ["AWS API Call via CloudTrail"],
+  "detail": {
+    "eventSource": ["s3.amazonaws.com"],
+    "eventName": ["GetObject", "PutObject", "DeleteObject", "DeleteObjects", "ListObjects", "ListObjectsV2", "CopyObject"],
+    "userIdentity": {
+      "type": ["AssumedRole"],
+      "sessionContext": {
+        "sessionIssuer": {
+          "userName": ["inventory-api-ec2"]
+        }
+      }
+    },
+    "additionalEventData": {
+      "vpcEndpointId": [{ "exists": false }]
+    }
+  }
+}
