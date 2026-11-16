@@ -69,6 +69,83 @@ routing and its workflow (Kubernetes runs the API now), the orchestrator (the pa
 API serves `/interop/orders/random` itself), the EKS manifests, the queue and the
 distributed cache, none of which the synchronous flow needs.
 
+## Security chaos (defence in depth)
+
+The same flow is the subject of a security game day: adverse conditions are run against
+the controls themselves to see whether they detect, contain and resist. The target is not
+speed but the effectiveness of each control. The rules of engagement
+([`security/RULES-OF-ENGAGEMENT.md`](security/RULES-OF-ENGAGEMENT.md)) bound it to this
+account's own resources, synthetic data and an agreed window. Round 0 runs against the
+controls as they are (4.2.0); round 1 after the improvements (4.3.0).
+
+**Inventory of controls by layer.**
+
+| Layer | Control | Owner | Expected signal | Today (4.2.0) → 4.3.0 |
+| --- | --- | --- | --- | --- |
+| Identity | Node role with no static keys, IMDSv2 | AWS | — | Exists, no misuse detection → EventBridge rule "role on S3 without `vpcEndpointId`" + session revoke |
+| Network | SGs: node only from the ALB, RDS only from the node | AWS | — | Exists → S3 VPC endpoint + bucket policy `aws:SourceVpce` on `flows/` |
+| Workload | Pods non-root, read-only disk, no capabilities | AWS | — | Exists |
+| Data | S3 private and encrypted; RDS encrypted | AWS | — | No versioning → versioning + Object Lock (governance) |
+| Detection & response | CloudWatch logs and alarms | AWS | Alarm | No data-plane trail → CloudTrail S3 data events, EventBridge, `/security/alerts`, honeytoken |
+| Telemetry & AI (GCP) | Cloud Monitoring alerts, Gemini assistant | GCP | Alert | Partner adds audit-log alert, heartbeat alert, AI mitigations |
+
+**Experiments (two-person version: 1 mandatory + minimal 4, plus the partner's 3).**
+
+| # | Adverse condition | Owner | Round-0 expectation | Improvement (4.3.0) |
+| --- | --- | --- | --- | --- |
+| 1 Machine identity | The node role's IMDSv2 credentials used from outside AWS against S3 | AWS | Nothing logs it at object level: MTTD = ∞, MTTC = ∞ | CloudTrail+EventBridge detection; VPC-endpoint bucket policy → `AccessDenied`; session revoke |
+| 4 Data resilience | Ransomware: `flows/` objects overwritten and deleted | AWS runs, GCP analyses | No versioning: data gone, RPO/RTO = ∞ | Versioning + Object Lock; restore measures RTO; a delete rule |
+| 3 Telemetry & AI | Logging degraded + prompt injected into the AI triage assistant | GCP | — | Audit-log alert, heartbeat alert, data/instruction separation |
+
+**Detection as code.** Each rule is an EventBridge pattern in
+[`security/detections/`](security/detections/) with a positive event that must fire it and
+a negative one from normal flow traffic that must not. `aws events test-event-pattern`
+returns `true`/`false` in the `Detections` workflow
+([`security/test-detections.sh`](security/test-detections.sh)), and Terraform builds the
+rule from the same file. The game day runs as code in
+[`gameday.yml`](.github/workflows/gameday.yml) (`exp1-attack`/`exp1-contain`,
+`exp4-attack`/`exp4-restore`); the stop switch is cancelling the run.
+
+**Traceability.** Each ID checked on the MITRE and ISO sources before writing it here.
+
+| Experiment | MITRE ATT&CK / ATLAS | MITRE D3FEND (countermeasure) | ISO/IEC 27001:2022 Annex A |
+| --- | --- | --- | --- |
+| 1 Stolen node credential | T1552.005 (credentials from the cloud metadata API), T1078.004 (valid cloud accounts), T1530 (data from cloud storage) | D3-RAPA Resource Access Pattern Analysis (the EventBridge rule); D3-NI Network Isolation (VPC endpoint + bucket policy); D3-CR Credential Revoking (session revoke) | A.5.17, A.8.2, A.8.15, A.8.16, A.8.22 |
+| 4 Ransomware on `flows/` | T1486 (data encrypted for impact), T1485 (data destruction) | — (recovery is continuity: versioning + Object Lock) | A.8.13 (backup), A.5.30 (ICT readiness for continuity) |
+| Honeytoken | — | D3-DO Decoy Object | A.8.16 |
+| 3 Telemetry (GCP) | T1562.008 (disable or modify cloud logs) | — (partner completes) | A.8.15, A.8.16 |
+| 3 AI injection (GCP) | ATLAS AML.T0051.001 (indirect LLM prompt injection) | — (partner completes) | — |
+
+```mermaid
+flowchart TB
+  runner([GitHub runner<br/>outside AWS])
+  subgraph AWS["AWS account (own resources only)"]
+    imds[IMDSv2<br/>node role credentials]
+    subgraph bucket["S3 bucket"]
+      flows[flows/ objects]
+      honey[honeytoken<br/>flows/admin-credentials-backup.json]
+    end
+    vpce[S3 VPC endpoint<br/>+ bucket policy aws:SourceVpce]
+    trail[CloudTrail<br/>S3 data events]
+    eb[EventBridge rules]
+    alerts[/security/alerts/]
+  end
+  runner -- "exp 1: stolen credential" --> imds
+  imds -. "used from outside" .-> vpce
+  vpce -- "4.3.0: AccessDenied" --x flows
+  runner -- "exp 4: overwrite / delete" --> flows
+  flows -- versions + Object Lock --> flows
+  trail --> eb --> alerts
+  honey -. "any read" .-> trail
+
+  classDef adv stroke:#d62728,stroke-dasharray:4 3
+  class runner,imds adv
+```
+
+Trust boundary: the VPC endpoint. Injection points: the stolen credential and the bucket
+writes, both from the runner. Telemetry is collected at CloudTrail → EventBridge →
+`/security/alerts`, where MTTD and MTTC are measured against the attack's timestamp.
+
 ### Expand / Contract
 
 Every release shares one database and may be rolled back at any moment, so v3
