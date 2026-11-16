@@ -1,0 +1,224 @@
+name: Game day
+
+# The security chaos game day as code. Every step acts ONLY on this account's own
+# resources, with synthetic data, inside an agreed window (security/RULES-OF-ENGAGEMENT.md).
+# Stop switch: cancel the run. Nothing injected outlives a step.
+
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: One act of the game day
+        type: choice
+        options: [exp1-attack, exp1-contain, exp4-attack, exp4-restore]
+        default: exp1-attack
+      round:
+        description: 0 before the controls (v4.2.0), 1 after them (v4.3.0)
+        type: string
+        default: "0"
+      t0:
+        description: "exp1-contain / exp4-restore: ISO time of the matching attack, to measure MTTC / RTO. Empty = now"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency: gameday
+
+jobs:
+  gameday:
+    runs-on: ubuntu-latest
+    env:
+      STEP: ${{ inputs.step }}
+      ROUND: ${{ inputs.round }}
+      T0_INPUT: ${{ inputs.t0 }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+
+      - name: Read the target from the Terraform state
+        working-directory: terraform
+        run: |
+          BUCKET_STATE="inventory-api-tfstate-$(aws sts get-caller-identity --query Account --output text)"
+          terraform init -backend-config="bucket=$BUCKET_STATE" > /dev/null
+          {
+            echo "BUCKET=$(terraform output -raw bucket)"
+            echo "NODE_ID=$(terraform output -raw node_id)"
+            echo "NODE_ROLE=$(terraform output -raw node_role)"
+          } >> "$GITHUB_ENV"
+
+      # --- Experiment 1: a stolen machine credential used from outside AWS ---------------
+      - name: "exp1-attack: read the node credentials and use them from the runner"
+        if: inputs.step == 'exp1-attack'
+        run: |
+          T0=$(date -u +%FT%TZ)
+          echo "T0=$T0" >> "$GITHUB_ENV"
+          echo "### exp1-attack, round $ROUND" >> "$GITHUB_STEP_SUMMARY"
+          echo "First adverse act (T0): $T0" >> "$GITHUB_STEP_SUMMARY"
+
+          # A synthetic victim under flows/, written with the job's own credentials so there is
+          # always something to read. In round 1 the stolen credential is denied reaching it.
+          VICTIM="flows/gameday-victim/exp1.json"
+          aws s3api put-object --bucket "$BUCKET" --key "$VICTIM" \
+            --body <(echo '{"flow":"synthetic"}') --content-type application/json >/dev/null
+
+          # Through SSM, read the role credentials IMDSv2 hands to the node (hop limit 2).
+          READ='TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 120");
+          R=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/);
+          curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/$R'
+          CMD=$(aws ssm send-command --instance-ids "$NODE_ID" --document-name AWS-RunShellScript \
+            --parameters commands="$READ" --query Command.CommandId --output text)
+          aws ssm wait command-executed --command-id "$CMD" --instance-id "$NODE_ID" || true
+          CREDS=$(aws ssm get-command-invocation --command-id "$CMD" --instance-id "$NODE_ID" \
+            --query StandardOutputContent --output text)
+
+          AK=$(echo "$CREDS" | jq -r .AccessKeyId)
+          SK=$(echo "$CREDS" | jq -r .SecretAccessKey)
+          ST=$(echo "$CREDS" | jq -r .Token)
+          echo "::add-mask::$AK"; echo "::add-mask::$SK"; echo "::add-mask::$ST"
+          echo "ATTACK_KEY=$AK" >> "$GITHUB_ENV"   # kept masked, used by exp1-contain's verify
+
+          # Use them from here, outside the VPC. Tagged so CloudTrail shows it was the game day.
+          export AWS_ACCESS_KEY_ID="$AK" AWS_SECRET_ACCESS_KEY="$SK" AWS_SESSION_TOKEN="$ST"
+          export AWS_EXECUTION_ENV="gameday-exp1-r$ROUND"
+          KEY="$VICTIM"
+
+          OUT=$(aws s3api get-object --bucket "$BUCKET" --key "$KEY" /tmp/stolen.json 2>&1 && echo OK || echo "$OUT")
+          HONEY=$(aws s3api get-object --bucket "$BUCKET" --key flows/admin-credentials-backup.json \
+            /tmp/honey.json 2>&1 && echo OK || true)
+          {
+            echo ""
+            echo "| Call | Result |"
+            echo "|---|---|"
+            echo "| GetObject $KEY | $(echo "$OUT" | grep -q OK && echo 'succeeded — credential works from outside' || echo 'AccessDenied — control held') |"
+            echo "| GetObject the honeytoken | $(echo "$HONEY" | grep -q OK && echo 'read (decoy)' || echo 'AccessDenied') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "exp1-attack: measure MTTD from /security/alerts"
+        if: inputs.step == 'exp1-attack'
+        run: |
+          START=$(date -u -d "$T0" +%s)
+          DETECTED=""
+          for _ in $(seq 36); do   # up to 6 min
+            HIT=$(aws logs filter-log-events --log-group-name /security/alerts \
+              --start-time "$(($START * 1000))" \
+              --filter-pattern '"inventory-api-node-role-outside-vpce"' \
+              --query 'events[0].timestamp' --output text 2>/dev/null || echo None)
+            if [ "$HIT" != "None" ] && [ -n "$HIT" ]; then DETECTED=$HIT; break; fi
+            sleep 10
+          done
+          if [ -n "$DETECTED" ]; then
+            MTTD=$(( DETECTED/1000 - START ))
+            echo "**MTTD: ${MTTD}s** (alert at $(date -u -d @$((DETECTED/1000)) +%FT%TZ))" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**MTTD: not detected within 6 min** (round 0: no CloudTrail/EventBridge yet → MTTD = ∞)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: "exp1-contain: revoke the role's sessions, then verify and revert"
+        if: inputs.step == 'exp1-contain'
+        run: |
+          T0=${T0_INPUT:-$(date -u +%FT%TZ)}
+          CUT=$(date -u +%FT%TZ)
+          echo "### exp1-contain, round $ROUND" >> "$GITHUB_STEP_SUMMARY"
+
+          # The AWS "revoke older sessions" guardrail: deny everything to sessions issued
+          # before now. New credentials the node gets after this are unaffected.
+          POLICY=$(jq -n --arg t "$CUT" '{Version:"2012-10-17",Statement:[{Effect:"Deny",Action:"*",Resource:"*",Condition:{DateLessThan:{"aws:TokenIssueTime":$t}}}]}')
+          aws iam put-role-policy --role-name "$NODE_ROLE" --policy-name AWSRevokeOlderSessions \
+            --policy-document "$POLICY"
+          CONTAINED=$(date -u +%FT%TZ)
+          MTTC=$(( $(date -u -d "$CONTAINED" +%s) - $(date -u -d "$T0" +%s) ))
+          {
+            echo "First adverse act (T0): $T0"
+            echo "Sessions revoked at: $CONTAINED"
+            echo "**MTTC: ${MTTC}s**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Revert so there is no drift: the node self-heals with a fresh session.
+          sleep 15
+          aws iam delete-role-policy --role-name "$NODE_ROLE" --policy-name AWSRevokeOlderSessions
+          echo "Reverted: inline revoke policy removed; the role is back to its Terraform state." >> "$GITHUB_STEP_SUMMARY"
+
+      # --- Experiment 4: ransomware on the flows/ objects --------------------------------
+      - name: "exp4-attack: overwrite and delete the flows objects"
+        if: inputs.step == 'exp4-attack'
+        run: |
+          T0=$(date -u +%FT%TZ)
+          echo "### exp4-attack, round $ROUND" >> "$GITHUB_STEP_SUMMARY"
+          echo "First adverse act (T0): $T0" >> "$GITHUB_STEP_SUMMARY"
+
+          # A synthetic victim object, written now so there is a known-good version.
+          KEY="flows/gameday-r$ROUND/$(date -u +%s).json"
+          aws s3api put-object --bucket "$BUCKET" --key "$KEY" \
+            --body <(echo '{"flow":"synthetic good data"}') --content-type application/json >/dev/null
+          GOOD=$(date -u +%FT%TZ)
+          echo "GOOD_KEY=$KEY" >> "$GITHUB_ENV"
+
+          # Ransomware: overwrite with garbage, then try to delete.
+          OVER=$(aws s3api put-object --bucket "$BUCKET" --key "$KEY" \
+            --body <(echo 'ENCRYPTED-BY-RANSOMWARE') 2>&1 && echo OK || echo FAIL)
+          DEL=$(aws s3api delete-object --bucket "$BUCKET" --key "$KEY" 2>&1 && echo OK || echo FAIL)
+          NVER=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "$KEY" \
+            --query 'length(Versions || `[]`)' --output text 2>/dev/null || echo 0)
+          {
+            echo ""
+            echo "| Act | Result |"
+            echo "|---|---|"
+            echo "| last good write | $GOOD |"
+            echo "| overwrite | $OVER |"
+            echo "| delete | $DEL |"
+            echo "| versions kept | $NVER (round 0 without versioning: 1, nothing to recover; round 1: ≥2) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "exp4-restore: bring back the last good version and measure RTO"
+        if: inputs.step == 'exp4-restore'
+        run: |
+          T0=${T0_INPUT:-$(date -u +%FT%TZ)}
+          START=$(date -u +%s)
+          echo "### exp4-restore, round $ROUND" >> "$GITHUB_STEP_SUMMARY"
+
+          # The most recent flows/gameday object: its versions, newest first.
+          KEY=$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "flows/gameday-r$ROUND/" \
+            --query 'Contents[-1].Key' --output text)
+          VERS=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "$KEY" \
+            --query 'Versions | sort_by(@, &LastModified)' --output json)
+          N=$(echo "$VERS" | jq length)
+          if [ "$N" -lt 2 ]; then
+            echo "Only $N version(s): nothing to restore (round 0). **RPO / RTO = ∞**." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # The good version is the one before the ransomware overwrite.
+          GOOD_VID=$(echo "$VERS" | jq -r '.[-2].VersionId')
+          GOOD_TS=$(echo "$VERS" | jq -r '.[-2].LastModified')
+          BAD_TS=$(echo "$VERS" | jq -r '.[-1].LastModified')
+          aws s3api copy-object --bucket "$BUCKET" --key "$KEY" \
+            --copy-source "$BUCKET/$KEY?versionId=$GOOD_VID" >/dev/null
+          RTO=$(( $(date -u +%s) - START ))
+          RPO=$(( $(date -u -d "$BAD_TS" +%s) - $(date -u -d "$GOOD_TS" +%s) ))
+          {
+            echo "Restored version $GOOD_VID (written $GOOD_TS)."
+            echo "**RTO: ${RTO}s** · **RPO: ${RPO}s** (good write → ransomware overwrite)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the evidence
+        if: always()
+        run: |
+          mkdir -p gameday-out
+          cp "$GITHUB_STEP_SUMMARY" gameday-out/summary-$STEP-r$ROUND.md 2>/dev/null || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gameday-${{ inputs.step }}-r${{ inputs.round }}
+          path: gameday-out/
