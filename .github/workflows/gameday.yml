@@ -103,9 +103,9 @@ jobs:
           # Use them from here, outside the VPC. Tagged so CloudTrail shows it was the game day.
           export AWS_ACCESS_KEY_ID="$AK" AWS_SECRET_ACCESS_KEY="$SK" AWS_SESSION_TOKEN="$ST"
           export AWS_EXECUTION_ENV="gameday-exp1-r$ROUND"
-          OUT1=$(aws s3api get-object --bucket "$BUCKET" --key "$VICTIM" /tmp/stolen.json 2>&1 && echo OK || echo DENIED)
-          HONEY=$(aws s3api get-object --bucket "$BUCKET" --key flows/admin-credentials-backup.json \
-            /tmp/honey.json 2>&1 && echo OK || echo DENIED)
+          # get-object prints JSON on success, so judge by exit status, not by the output.
+          if aws s3api get-object --bucket "$BUCKET" --key "$VICTIM" /tmp/stolen.json >/dev/null 2>&1; then OUT1=OK; else OUT1=DENIED; fi
+          if aws s3api get-object --bucket "$BUCKET" --key flows/admin-credentials-backup.json /tmp/honey.json >/dev/null 2>&1; then HONEY=OK; else HONEY=DENIED; fi
           {
             echo ""
             echo "| Call (stolen credential, from the runner) | Result |"
@@ -190,10 +190,10 @@ jobs:
             --body /tmp/good.json --content-type application/json >/dev/null
           GOOD=$(date -u +%FT%TZ)
 
-          # Ransomware: overwrite with garbage, then try to delete.
+          # Ransomware: overwrite with garbage, then try to delete. Judge by exit status.
           echo 'ENCRYPTED-BY-RANSOMWARE' > /tmp/bad.json
-          OVER=$(aws s3api put-object --bucket "$BUCKET" --key "$KEY" --body /tmp/bad.json 2>&1 && echo OK || echo FAIL)
-          DEL=$(aws s3api delete-object --bucket "$BUCKET" --key "$KEY" 2>&1 && echo OK || echo FAIL)
+          if aws s3api put-object --bucket "$BUCKET" --key "$KEY" --body /tmp/bad.json >/dev/null 2>&1; then OVER=OK; else OVER=FAIL; fi
+          if aws s3api delete-object --bucket "$BUCKET" --key "$KEY" >/dev/null 2>&1; then DEL=OK; else DEL=FAIL; fi
           NVER=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "$KEY" \
             --query 'length(Versions || `[]`)' --output text 2>/dev/null || echo 0)
           {
