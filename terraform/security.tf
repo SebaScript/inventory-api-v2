@@ -29,7 +29,9 @@ resource "aws_s3_bucket_object_lock_configuration" "exports" {
 }
 
 # The honeytoken: a decoy nobody legitimate ever reads. Any GetObject on it is an alert,
-# almost without false positives. Synthetic content, no real credentials.
+# almost without false positives. Synthetic content, no real credentials. HeadObject is left out on
+# purpose: Terraform's own refresh issues one on every plan and apply (measured), and it reveals no
+# content.
 resource "aws_s3_object" "honeytoken" {
   bucket       = aws_s3_bucket.exports.id
   key          = "flows/admin-credentials-backup.json"
@@ -190,14 +192,23 @@ resource "aws_cloudwatch_event_target" "to_security_log" {
   arn      = aws_cloudwatch_log_group.security.arn
 }
 
-# Each rule's firing becomes a metric, so an alarm can show it on the dashboard and the
-# MTTD query has something to count.
+# Each detection becomes a metric, so an alarm can show it on the dashboard. The rules deliver
+# the CloudTrail record itself, with no rule name in it, so each filter matches the event's content.
+# Tested against real alerts with aws logs test-metric-filter: a legitimate read through the VPC
+# endpoint matches none of them.
+locals {
+  metric_patterns = {
+    "node-role-outside-vpce" = "{ ($.detail.userIdentity.sessionContext.sessionIssuer.userName = \"${aws_iam_role.api.name}\") && ($.detail.additionalEventData.vpcEndpointId NOT EXISTS) }"
+    "honeytoken-read"        = "{ ($.detail.requestParameters.key = \"${aws_s3_object.honeytoken.key}\") && ($.detail.eventName = \"GetObject\") }"
+    "flows-destruction"      = "{ $.detail.eventName = \"DeleteObject*\" }"
+  }
+}
+
 resource "aws_cloudwatch_log_metric_filter" "detection" {
   for_each       = local.detections
   name           = "${var.project}-${each.key}"
   log_group_name = aws_cloudwatch_log_group.security.name
-  # Every event the rules deliver carries the rule name in resources[].
-  pattern = "\"${var.project}-${each.key}\""
+  pattern        = local.metric_patterns[each.key]
 
   metric_transformation {
     name          = each.key
