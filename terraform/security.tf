@@ -23,6 +23,9 @@ resource "aws_s3_bucket_object_lock_configuration" "exports" {
       days = 1
     }
   }
+
+  # Object Lock needs versioning already Enabled, or AWS returns InvalidBucketState (409).
+  depends_on = [aws_s3_bucket_versioning.exports]
 }
 
 # The honeytoken: a decoy nobody legitimate ever reads. Any GetObject on it is an alert,
