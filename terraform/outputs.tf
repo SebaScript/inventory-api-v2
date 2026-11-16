@@ -15,8 +15,22 @@ output "image_tag" {
 }
 
 output "node_id" {
-  description = "The Kubernetes node: kubectl runs on it through SSM"
+  description = "The Kubernetes node: kubectl runs on it through SSM, and the game day reads its IMDS"
   value       = aws_instance.node.id
+}
+
+output "bucket" {
+  description = "The data bucket the security game day attacks"
+  value       = aws_s3_bucket.exports.bucket
+}
+
+output "node_role" {
+  description = "The role whose stolen credentials exp 1 uses; exp1-contain revokes its sessions"
+  value       = aws_iam_role.api.name
+}
+
+output "security_dashboard_url" {
+  value = "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards/dashboard/${aws_cloudwatch_dashboard.security.dashboard_name}"
 }
 
 output "partner_host" {
