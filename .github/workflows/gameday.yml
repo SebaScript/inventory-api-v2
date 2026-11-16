@@ -50,12 +50,13 @@ jobs:
       - name: Read the target from the Terraform state
         working-directory: terraform
         run: |
-          BUCKET_STATE="inventory-api-tfstate-$(aws sts get-caller-identity --query Account --output text)"
-          terraform init -backend-config="bucket=$BUCKET_STATE" > /dev/null
+          ACCT=$(aws sts get-caller-identity --query Account --output text)
+          terraform init -backend-config="bucket=inventory-api-tfstate-$ACCT" > /dev/null
+          # Deterministic names, so round 0 works on the v4.2.0 state too (it predates these outputs).
           {
-            echo "BUCKET=$(terraform output -raw bucket)"
+            echo "BUCKET=inventory-api-exports-$ACCT"
+            echo "NODE_ROLE=inventory-api-ec2"
             echo "NODE_ID=$(terraform output -raw node_id)"
-            echo "NODE_ROLE=$(terraform output -raw node_role)"
           } >> "$GITHUB_ENV"
 
       # --- Experiment 1: a stolen machine credential used from outside AWS ---------------
@@ -70,8 +71,9 @@ jobs:
           # A synthetic victim under flows/, written with the job's own credentials so there is
           # always something to read. In round 1 the stolen credential is denied reaching it.
           VICTIM="flows/gameday-victim/exp1.json"
+          echo '{"flow":"synthetic"}' > /tmp/victim.json
           aws s3api put-object --bucket "$BUCKET" --key "$VICTIM" \
-            --body <(echo '{"flow":"synthetic"}') --content-type application/json >/dev/null
+            --body /tmp/victim.json --content-type application/json >/dev/null
 
           # Through SSM, read the role credentials IMDSv2 hands to the node (hop limit 2).
           READ='TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 120");
@@ -166,14 +168,16 @@ jobs:
 
           # A synthetic victim object, written now so there is a known-good version.
           KEY="flows/gameday-r$ROUND/$(date -u +%s).json"
+          echo '{"flow":"synthetic good data"}' > /tmp/good.json
           aws s3api put-object --bucket "$BUCKET" --key "$KEY" \
-            --body <(echo '{"flow":"synthetic good data"}') --content-type application/json >/dev/null
+            --body /tmp/good.json --content-type application/json >/dev/null
           GOOD=$(date -u +%FT%TZ)
           echo "GOOD_KEY=$KEY" >> "$GITHUB_ENV"
 
           # Ransomware: overwrite with garbage, then try to delete.
+          echo 'ENCRYPTED-BY-RANSOMWARE' > /tmp/bad.json
           OVER=$(aws s3api put-object --bucket "$BUCKET" --key "$KEY" \
-            --body <(echo 'ENCRYPTED-BY-RANSOMWARE') 2>&1 && echo OK || echo FAIL)
+            --body /tmp/bad.json 2>&1 && echo OK || echo FAIL)
           DEL=$(aws s3api delete-object --bucket "$BUCKET" --key "$KEY" 2>&1 && echo OK || echo FAIL)
           NVER=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "$KEY" \
             --query 'length(Versions || `[]`)' --output text 2>/dev/null || echo 0)
