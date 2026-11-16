@@ -38,6 +38,18 @@ plano de datos **no se registra** (no hay CloudTrail con *data events*), así qu
 los experimentos 1 y 4 no dejan rastro consultable. Esa es la línea base: sin ella no hay
 experimento, y es justo lo que la ronda 0 confirma.
 
+### Reglas de compromiso (resumen de `security/RULES-OF-ENGAGEMENT.md`, acordadas antes de ejecutar)
+
+| | |
+|---|---|
+| Ventana | Ronda 0: 16-nov 03:29–03:32 UTC · Ronda 1: 16-nov 04:09–04:15 UTC, con la infraestructura arriba y los dos integrantes avisados |
+| Alcance autorizado | Solo la cuenta AWS de A (recursos `inventory-api-*`) y el proyecto GCP de B. Nada de terceros ni de la Universidad |
+| Radio de impacto | Exp 1: el rol del nodo y el prefijo `flows/` de un bucket. Exp 4: objetos `flows/gameday-r<ronda>/` de ese único bucket |
+| Datos | Sintéticos (objetos creados por el propio game day) |
+| Interruptor de parada | Cancelar el run de `gameday.yml`; ninguna inyección sobrevive a su paso |
+| Reversión (probada) | Exp 1: `exp1-contain` revoca y luego retira su política (sin drift). Exp 4: `exp4-restore` |
+| Bitácora | Runs y *artifacts* de GitHub Actions, CloudTrail (con `AWS_EXECUTION_ENV=gameday-…`) y `/security/alerts` |
+
 ## 2. Hipótesis de control (falsables)
 
 - **Exp 1.** Dado el rol del nodo tal como está hoy, cuando sus credenciales se usen desde fuera
@@ -72,16 +84,30 @@ sobre el honeytoken. Marcado con `AWS_EXECUTION_ENV=gameday-exp1-r<ronda>` (qued
 | Contención (MTTC) | **∞** — la credencial sirve hasta caducar | **61 s** — `exp1-contain` revoca las sesiones del rol (run 43802488476); el nodo recibe credenciales nuevas, sin drift |
 
 Medido: en la ronda 1 la credencial robada ya no sirve desde fuera (dos capas: la bucket policy la
-bloquea y la revocación la invalida), y el acceso queda detectado en 4 s. Las tres alertas de la
-ronda 1 (GetObject del objeto víctima y dos del honeytoken, todas `AccessDenied` por *resource-based
-policy*) están en `/security/alerts` con su `traceId` de CloudTrail.
+bloquea y la revocación la invalida), y el acceso queda detectado en 4 s. Cada ataque deja tres
+alertas en `/security/alerts` (el GetObject del objeto víctima y el del honeytoken, que entregan
+dos reglas), todas `AccessDenied` por *resource-based policy*, cada una con su `eventID` de CloudTrail.
+
+**Minuto a minuto (16-nov, UTC):**
+
+| Hora | Ronda 0 (run 43798528174) | Hora | Ronda 1 (runs 43802363668 y 43802488476) |
+|---|---|---|---|
+| 03:30:15 | T0: robo de la credencial por SSM/IMDSv2 y uso desde el runner | 04:10:07 | T0: robo de la credencial por SSM/IMDSv2 |
+| ≤ 03:30:23 | `GetObject` de `flows/` **con éxito** (antes del fin del run); nada lo registra | 04:10:11 | uso desde el runner → `AccessDenied`; **alerta** en `/security/alerts` (MTTD 4 s) |
+| — | sin detección ni contención: la credencial sirve hasta caducar | 04:10:12 | lectura del honeytoken → `AccessDenied` + alerta `honeytoken-read` |
+| | | 04:11:08 | sesiones del rol revocadas (MTTC 61 s) |
+| | | 04:11:23 | reversión: política de revocación retirada, el nodo sigue sirviendo |
+
+T0 es el inicio del ataque (el robo); la regla salta en el primer **uso** de la credencial.
 
 **Mejoras aplicadas (v4.3.0), dos propias de la capa:**
 
 1. **Detección (D3-RAPA Resource Access Pattern Analysis).** CloudTrail con *data events* de S3 →
    regla EventBridge: el rol del nodo tocando S3 **sin `vpcEndpointId`** → `/security/alerts` +
    alarma. Probada como código: evento positivo dispara, evento negativo (a través del endpoint)
-   no. Verificado con `aws events test-event-pattern` (`ok` en los dos casos).
+   no. Verificado con `aws events test-event-pattern` (`ok` en los dos casos). *La capa de alarma
+   no funcionó en la ronda 1 (ver lecciones aprendidas); el MTTD se midió sobre `/security/alerts`,
+   que sí funcionó, y la alarma quedó corregida y verificada después (pasa a ALARM en ~40 s).*
 2. **Frontera de red (D3-NI Network Isolation).** Endpoint de VPC para S3 + *bucket policy* que
    **niega el acceso a `flows/` del rol del nodo que no llegue por el endpoint** (`aws:SourceVpce`).
    La credencial robada, usada fuera, recibe `AccessDenied`. Se acota al rol y al prefijo `flows/`
@@ -113,6 +139,12 @@ basura e intenta borrarlo; `step=exp4-restore` recupera la última versión buen
 
 En la ronda 1, `exp4-restore` recuperó la versión buena (`wUNFakzD…`) en 2 s; el Object Lock
 (governance, 1 día) además impide borrar o sobrescribir esa versión dentro de la retención.
+
+**Minuto a minuto (16-nov, UTC):** ronda 0 (run 43798608890): 03:31:04 T0 · 03:31:05 escritura
+buena · acto seguido sobrescritura y borrado con éxito · 0 versiones: dato perdido, sin alerta.
+Ronda 1 (runs 43802607351 y 43802848069): 04:12:19 T0 · 04:12:21 escritura buena · sobrescritura ·
+04:12:22 borrado (queda un *delete marker*) y **alerta `flows-destruction`** en `/security/alerts`
+(3 s) · 04:14:13 se lanza `exp4-restore` · versión buena restaurada en 2 s (RTO).
 
 **Mejoras aplicadas (v4.3.0):**
 
@@ -154,13 +186,20 @@ MTTC = hora en que la credencial deja de servir − primer acto. Cobertura = té
 emuladas: en la ronda 1, las dos técnicas de A (T1552.005/T1078.004 y T1486/T1485) se detectaron →
 **100 %**.
 
-**Falsos positivos medidos: 0.** Durante las dos rondas, con el despliegue y los *smoke tests*
-generando tráfico normal de la app, `/security/alerts` recibió **14 eventos y los 14 son del game
-day** (honeytoken ×9, objeto víctima ×4, borrado de `flows/` ×1). El tráfico legítimo no dispara
-ninguna regla porque va por el endpoint de VPC (lleva `vpcEndpointId`) y no borra objetos `flows/`.
-La tasa base importa: una regla con muchos FP se ignora; aquí el honeytoken y el filtro por
-`vpcEndpointId` dan señal casi sin ruido. El caso negativo de cada regla
-(`security/detections/*.negative.json`) prueba lo mismo en CI antes de desplegar.
+**Falsos positivos del tráfico de la app: 0.** Durante las dos rondas, con el despliegue y los
+*smoke tests* generando tráfico normal, `/security/alerts` recibió **14 entregas**: 12 de los cuatro
+ataques del exp 1 (víctima ×4 y honeytoken ×8, porque cada lectura del señuelo la entregan dos
+reglas), 1 del borrado del exp 4 y 1 `HeadObject` del señuelo hecho por un operador al verificar el
+despliegue. **Ninguna del tráfico de la app:** va por el endpoint de VPC (lleva `vpcEndpointId`) y
+nunca borra objetos `flows/`. El caso negativo de cada regla (`security/detections/*.negative.json`)
+prueba lo mismo en CI antes de desplegar.
+
+**Falso positivo encontrado y corregido (ingeniería de detección).** Al verificar las alarmas se vio
+que **Terraform hace `HeadObject` sobre el honeytoken en cada `plan`/`apply`** (su *refresh*): con la
+regla original (`GetObject` o `HeadObject`) el señuelo habría saltado en cada despliegue. Se ajustó a
+solo `GetObject` (leer el contenido, que es lo que haría quien busca credenciales); el evento real de
+Terraform, pasado por `aws events test-event-pattern`, ya da `false`. La tasa base importa: una
+regla que salta en cada despliegue acaba ignorada, y entonces tampoco se mira el día que es real.
 
 ## 7. IA en la defensa (humano en el bucle) y tendencias
 
@@ -188,7 +227,25 @@ con la telemetría real:
    Reglamento (UE) 2024/2847 (aviso 24 h, notificación 72 h, vigente desde el 11-sep-2026),
    contrastado con lo exigido en Colombia.
 
-## 8. Riesgos residuales y próximos experimentos
+## 8. Lecciones aprendidas, riesgos residuales y próximos experimentos
+
+**Lecciones aprendidas.**
+
+1. **Una detección se prueba de punta a punta, no solo su patrón.** La regla EventBridge funcionaba,
+   pero las alarmas nunca dispararon en la ronda 1: sus filtros buscaban el nombre de la regla, que
+   no viene en el evento entregado. Se corrigió filtrando por el contenido del evento, probado con
+   `aws logs test-metric-filter` contra alertas reales, y se verificó la alarma en ALARM.
+2. **Las herramientas propias también hacen ruido.** El *refresh* de Terraform tocaba el honeytoken
+   en cada despliegue; sin medirlo, el señuelo se habría vuelto una alarma que todos ignoran.
+3. **El instrumento de medida también se verifica.** La consulta paginada del MTTD añadía `None` y
+   el sondeo daba "no detectado" con la alerta ya en la bitácora a los 4 s: se contrastó con la
+   fuente (la bitácora) antes de creer el número.
+4. **La profundidad funcionó como capas independientes:** en la ronda 1 la credencial robada la
+   frenaron dos controles (bucket policy y revocación) y un tercero la vio (detección).
+5. **Object Lock se decide al crear el bucket**, no tras el incidente: habilitarlo obligó a recrear
+   el bucket. El versionado convierte el ransomware en un incidente de 2 s.
+
+**Riesgos residuales.**
 
 - El pipeline usa **claves estáticas de AWS** en secretos de GitHub; lo correcto sería federación
   OIDC (identidad sin secretos). Riesgo residual asumido.
@@ -199,8 +256,14 @@ con la telemetría real:
   honeytoken y el patrón de acceso (D3-RAPA tiene esa limitación, documentada por MITRE).
 - Enlaces prefirmados de `flows/`: con la *bucket policy* se descargarían fuera de la VPC con
   `AccessDenied`. Es aceptable (los `flows/` son internos); los `exports/` siguen abiertos.
-- Próximo experimento: terminar el nodo (fallo correlacionado de las dos réplicas) y medir el MTTR;
-  y el experimento 2 (exposición/segmentación), fuera del alcance de la versión de 2.
+
+**Próximos experimentos.**
+
+- **Experimento 2 (exposición y segmentación),** fuera del alcance de la versión de 2: abrir un
+  puerto de administración en el SG del nodo y medir si algo lo detecta.
+- **La credencial usada desde dentro del nodo** (por el endpoint): hoy solo la vería el honeytoken;
+  probar una regla por volumen o por prefijo inusual.
+- **Sustituir las claves estáticas del pipeline por OIDC** y repetir el exp 1 contra el pipeline.
 
 ## 9. Uso de IA en el análisis
 
