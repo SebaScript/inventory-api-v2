@@ -174,15 +174,19 @@ con la telemetría real:
 | Diagnóstico de los fallos del game day como código: `--parameters` abreviado de SSM, `file://` con ruta Windows, `aws events test-event-pattern` para probar las reglas, paginación de `filter-log-events` que añadía `None` al MTTD | Sí, cada uno verificado con una corrida real | — |
 | Correlación de las alertas de la ronda 1: las tres `AccessDenied` son el mismo ataque (víctima + honeytoken), no tres incidentes | Sí (mismo `principalId` del rol, mismo minuto) | Descartado contar el honeytoken como incidente aparte |
 
-**Tendencias verificables, implementadas (no solo mencionadas):**
+**Tendencias verificables, implementadas (no solo mencionadas). Fuentes consultadas el 2026-11-16:**
 
-1. **Honeytoken en el flujo.** Objeto señuelo `flows/admin-credentials-backup.json` + regla
-   EventBridge sobre su `GetObject`. D3FEND **D3-DO (Decoy Object)**. Fuente de la tendencia de
-   engaño/ITDR: (citar con fecha de consulta en el README). Nadie legítimo lo lee → alerta casi
-   sin FP.
-2. **Identidad de máquina no gestionada / Cyber Resilience Act (B).** El reporte del incidente
-   simulado se estructura con los tiempos del Reglamento (UE) 2024/2847 (aviso 24 h, notificación
-   72 h), contrastado con lo exigido en Colombia. (Fuente y fecha en el README.)
+1. **Identidad de máquina / agente no gestionada (A).** Fuente: Gartner, *Top Strategic Technology
+   Trends for 2027* (20-oct-2026): para 2028 el 25 % de las brechas empresariales se originará en el
+   abuso de agentes/credenciales de máquina. Implementada como la defensa del exp 1: detección ITDR
+   del rol del nodo usado fuera del endpoint (D3-RAPA), frontera Zero Trust en el bucket (D3-NI) y
+   revocación de sesiones (D3-CR).
+2. **Engaño / honeytoken (A).** Objeto señuelo `flows/admin-credentials-backup.json` + regla
+   EventBridge sobre su `GetObject` (D3-DO, Decoy Object). Verificado disparando en la ronda 1 sin
+   un solo falso positivo del tráfico legítimo.
+3. **Cyber Resilience Act (B).** El reporte del incidente simulado se estructura con los tiempos del
+   Reglamento (UE) 2024/2847 (aviso 24 h, notificación 72 h, vigente desde el 11-sep-2026),
+   contrastado con lo exigido en Colombia.
 
 ## 8. Riesgos residuales y próximos experimentos
 

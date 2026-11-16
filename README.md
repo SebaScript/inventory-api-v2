@@ -80,14 +80,14 @@ controls as they are (4.2.0); round 1 after the improvements (4.3.0).
 
 **Inventory of controls by layer.**
 
-| Layer | Control | Owner | Expected signal | Today (4.2.0) → 4.3.0 |
-| --- | --- | --- | --- | --- |
-| Identity | Node role with no static keys, IMDSv2 | AWS | — | Exists, no misuse detection → EventBridge rule "role on S3 without `vpcEndpointId`" + session revoke |
-| Network | SGs: node only from the ALB, RDS only from the node | AWS | — | Exists → S3 VPC endpoint + bucket policy `aws:SourceVpce` on `flows/` |
-| Workload | Pods non-root, read-only disk, no capabilities | AWS | — | Exists |
-| Data | S3 private and encrypted; RDS encrypted | AWS | — | No versioning → versioning + Object Lock (governance) |
-| Detection & response | CloudWatch logs and alarms | AWS | Alarm | No data-plane trail → CloudTrail S3 data events, EventBridge, `/security/alerts`, honeytoken |
-| Telemetry & AI (GCP) | Cloud Monitoring alerts, Gemini assistant | GCP | Alert | Partner adds audit-log alert, heartbeat alert, AI mitigations |
+| Layer | Control | Owner | Expected signal | D3FEND | Today (4.2.0) → 4.3.0 |
+| --- | --- | --- | --- | --- | --- |
+| Identity | Node role with no static keys, IMDSv2 | AWS | Alert on use outside the VPCe | D3-RAPA, D3-CR | Exists, no misuse detection → EventBridge rule "role on S3 without `vpcEndpointId`" + session revoke |
+| Network | SGs: node only from the ALB, RDS only from the node | AWS | — | D3-NI | Exists → S3 VPC endpoint + bucket policy `aws:SourceVpce` on `flows/` |
+| Workload | Pods non-root, read-only disk, no capabilities | AWS | — | — (hardening) | Exists |
+| Data | S3 private and encrypted; RDS encrypted | AWS | Alert on `flows/` deletes | D3-DO (honeytoken) | No versioning → versioning + Object Lock (governance) |
+| Detection & response | CloudWatch logs and alarms | AWS | Alarm | D3-RAPA | No data-plane trail → CloudTrail S3 data events, EventBridge, `/security/alerts`, honeytoken |
+| Telemetry & AI (GCP) | Cloud Monitoring alerts, Gemini assistant | GCP | Alert | — | Partner adds audit-log alert, heartbeat alert, AI mitigations |
 
 **Experiments (two-person version: 1 mandatory + minimal 4, plus the partner's 3).**
 
@@ -145,6 +145,23 @@ flowchart TB
 Trust boundary: the VPC endpoint. Injection points: the stolen credential and the bucket
 writes, both from the runner. Telemetry is collected at CloudTrail → EventBridge →
 `/security/alerts`, where MTTD and MTTC are measured against the attack's timestamp.
+
+**Rounds measured** (`gameday.yml`, two rounds, same method): exp 1 MTTD/MTTC ∞/∞ → **4 s / 61 s**;
+exp 4 RPO/RTO ∞/∞ → **1 s / 2 s**; **0 false positives** over both rounds. Detection coverage: the
+two emulated techniques detected (100 %).
+
+**Industry trends implemented (source + consulted 2026-11-16), not just mentioned.**
+
+- **Unmanaged machine / agent identity** — Gartner, *Top Strategic Technology Trends for 2027*
+  (2026-10-20): by 2028, 25 % of enterprise breaches trace to agent/machine-credential abuse.
+  Implemented as experiment 1's defence: ITDR detection of the node role used from outside the VPC
+  endpoint (D3-RAPA), a Zero-Trust bucket boundary (D3-NI), and session revocation (D3-CR).
+- **Deception / honeytoken** — a decoy `flows/admin-credentials-backup.json` with an EventBridge
+  rule on its read (D3-DO). Any access is an alert almost without false positives; verified firing
+  in round 1 while every legitimate request stayed silent.
+
+The partner (GCP) adds the second pair's trend: the incident report structured to the EU Cyber
+Resilience Act (Regulation 2024/2847) 24 h / 72 h timeline, in force since 2026-09-11.
 
 ### Expand / Contract
 
