@@ -55,7 +55,9 @@ queda *deviated*: hipótesis refutada.
   p95 (1 529 ms) es el propio timeout más el viaje. Cada petición de k6 lleva
   `x-correlation-id: k6-a-partner-latency-r0-<n>`: con ese id, los logs de `/inventory-api/app`
   muestran `Partner lookup failed: The operation was aborted due to timeout` y su `traceId`, y la
-  traza en Tempo muestra el tramo HTTP hacia B ocupando la petición (capturas en `reports/img/`).
+  traza en Tempo muestra el tramo HTTP hacia B ocupando la petición (p. ej. la petición
+  `k6-a-partner-latency-r0-2000`: 1 505 ms, traceId `ae847602573109e175762f197101c0a6`, en Grafana
+  Cloud → Explore → Tempo).
   Las lecturas simples no se inmutan (29 ms): el fallo es de la dependencia, no del proceso.
 - **(c) Agotamiento del pool de conexiones, con efecto en cascada.** 6 reportes/s × 2 s ≈ 12
   conexiones ocupadas frente a 10 disponibles (5 por réplica × 2). Las lecturas, que no tienen nada
@@ -99,7 +101,8 @@ el fallo activo).
 **Tablero.** CloudWatch `inventory-api`: latencia del flujo, ventana del fallo
 (`ChaosFaultActive`), llamadas a B por resultado (`ok`, `unavailable`, `short-circuited`),
 duración de las llamadas a B, reportes rechazados por el bulkhead y 5xx, todo en el mismo eje de
-tiempo. Capturas de las dos rondas en `reports/img/`.
+tiempo. Enlace al tablero con las dos rondas: CloudWatch (us-east-1) → Dashboards → `inventory-api`,
+rango 16-nov 01:15–02:45 UTC (15-nov 20:15–21:45 hora Colombia).
 
 ## 6. Hallazgos inesperados
 
