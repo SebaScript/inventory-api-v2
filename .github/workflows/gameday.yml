@@ -108,9 +108,15 @@ jobs:
       - name: "exp1-attack: measure MTTD from /security/alerts"
         if: inputs.step == 'exp1-attack'
         run: |
+          # Round 0 has no detection yet: no point polling for ten minutes.
+          if ! aws logs describe-log-groups --log-group-name-prefix /security/alerts \
+            --query 'logGroups[0].logGroupName' --output text 2>/dev/null | grep -q security; then
+            echo "**MTTD: not detected** (no /security/alerts: without CloudTrail + EventBridge, MTTD = ∞)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           START=$(date -u -d "$T0" +%s)
           DETECTED=""
-          for _ in $(seq 36); do   # up to 6 min
+          for _ in $(seq 60); do   # up to 10 min: CloudTrail data events take minutes to reach EventBridge
             HIT=$(aws logs filter-log-events --log-group-name /security/alerts \
               --start-time "$(($START * 1000))" \
               --filter-pattern '"inventory-api-node-role-outside-vpce"' \
@@ -122,7 +128,7 @@ jobs:
             MTTD=$(( DETECTED/1000 - START ))
             echo "**MTTD: ${MTTD}s** (alert at $(date -u -d @$((DETECTED/1000)) +%FT%TZ))" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "**MTTD: not detected within 6 min** (round 0: no CloudTrail/EventBridge yet → MTTD = ∞)" >> "$GITHUB_STEP_SUMMARY"
+            echo "**MTTD: not detected within 10 min** (CloudTrail delivery is slow, or round 0 → MTTD = ∞)" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: "exp1-contain: revoke the role's sessions, then verify and revert"
