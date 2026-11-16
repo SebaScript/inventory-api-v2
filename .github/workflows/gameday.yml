@@ -131,10 +131,11 @@ jobs:
           for _ in $(seq 60); do   # up to 10 min: CloudTrail data events take minutes to reach EventBridge
             # The delivered event is the CloudTrail record (no rule name in it): match the attack's own key.
             # The CLI prints "None" for no match; only a numeric timestamp counts as detection.
+            # head -n1: filter-log-events auto-paginates and an empty later page appends "None".
             HIT=$(aws logs filter-log-events --log-group-name /security/alerts \
               --start-time "$(($START * 1000))" \
               --filter-pattern '"gameday-victim"' \
-              --query 'events[0].timestamp' --output text 2>/dev/null)
+              --query 'events[0].timestamp' --output text 2>/dev/null | head -n1)
             if [[ "$HIT" =~ ^[0-9]+$ ]]; then DETECTED=$HIT; break; fi
             sleep 10
           done
