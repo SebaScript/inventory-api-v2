@@ -47,6 +47,11 @@ hypothesis, and one of them runs in the pipeline as a quality gate.
   document FIS itself runs, `AWSFIS-Run-Network-Latency-Sources`, to the node through
   Systems Manager. It removes the delay itself after five minutes or once cancelled, and
   the rollback clears it at once.
+- **Patterns (4.2.0):** the partner call times out at 300 ms, and a circuit breaker stops
+  calling after five failures in a row (30 s, then one trial call), so the flow degrades
+  at once. Reports run at most two at a time per replica, the rest refused at once with
+  503, and a report's statement times out after 1 s, so the reads keep their connections.
+  A request waits at most 2 s for a database connection.
 - **Fault switch:** `x-fault: error | latency | slow-db | partner-latency`, honoured
   only with the matching `x-fault-token`. Without `FAULT_TOKEN` set, nothing can be
   injected through the API.
@@ -117,16 +122,32 @@ flowchart LR
   end
 
   tempo[Grafana Cloud Tempo]
+  reports([chaos/reports.js<br/>slow reports, with the token])
 
   k6 --> alb --> pods
-  pods --> rds & s3
+  pods -- "pool: 5 connections per replica" --> rds
+  pods --> s3
   pods -- "GET /interop/orders/random<br/>x-correlation-id, traceparent" --> orders --> odb
-  ssm -. "(a) latency" .-> pods
+  ssm -. "(a) +2 s, node to partner only" .-> pods
+  reports -. "(c) x-fault: slow-db" .-> alb
+  fault_b{{"(b) FAULT_DB"}} -.-> odb
   pods -. metrics .-> cw
   fb -. logs .-> cw
   pods -. traces .-> tempo
   orders -. traces .-> tempo
+
+  classDef fault stroke:#d62728,stroke-dasharray:4 3
+  class ssm,reports,fault_b fault
 ```
+
+Each fault stays inside its own boundary; every metric is measured by k6 from outside
+the clouds, where the user stands, and the dashboard shows the fault window next to it.
+
+| Fault | Injected at | Blast radius | Target metric, measured by k6 | Also on the dashboard |
+| --- | --- | --- | --- | --- |
+| (a) latency | the node's network interface, towards the partner's host only | one node, one destination; database and reads untouched | p95 of `GET /v2/items/:id` | partner calls by outcome and duration, `ChaosFaultActive` |
+| (b) partner database | the partner's API, through its own switch | the partner's revision and its database calls | share of the flow with `partner.status = ok` | partner calls by outcome |
+| (c) connection pool | `POST /v2/exports/items`, only requests that carry the token | this API's pool; the database server is not touched | p95 of `GET /items/:id` | reports refused by the bulkhead, 5xx, `ChaosFaultActive` |
 
 ## API
 
