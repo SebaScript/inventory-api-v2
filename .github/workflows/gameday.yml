@@ -218,9 +218,10 @@ jobs:
           START=$(date -u +%s)
           echo "### exp4-restore, round $ROUND" > "$OUT"
 
-          # The most recent flows/gameday object: its versions, newest first.
-          KEY=$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "flows/gameday-r$ROUND/" \
-            --query 'Contents[-1].Key' --output text)
+          # From list-object-versions, not list-objects-v2: after the delete the current version is a
+          # delete marker, so the object no longer appears as a live object, only among its versions.
+          KEY=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "flows/gameday-r$ROUND/" \
+            --query 'Versions[-1].Key' --output text | head -n1)
           VERS=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "$KEY" \
             --query 'Versions | sort_by(@, &LastModified)' --output json)
           N=$(echo "$VERS" | jq length)
