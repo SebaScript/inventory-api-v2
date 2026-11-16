@@ -129,9 +129,10 @@ jobs:
           START=$(date -u -d "$T0" +%s)
           DETECTED=""
           for _ in $(seq 60); do   # up to 10 min: CloudTrail data events take minutes to reach EventBridge
+            # The delivered event is the CloudTrail record (no rule name in it): match the attack's own key.
             HIT=$(aws logs filter-log-events --log-group-name /security/alerts \
               --start-time "$(($START * 1000))" \
-              --filter-pattern '"inventory-api-node-role-outside-vpce"' \
+              --filter-pattern '"gameday-victim"' \
               --query 'events[0].timestamp' --output text 2>/dev/null || echo None)
             if [ "$HIT" != "None" ] && [ -n "$HIT" ]; then DETECTED=$HIT; break; fi
             sleep 10
