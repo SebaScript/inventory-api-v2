@@ -3,7 +3,7 @@
   "detail-type": ["AWS API Call via CloudTrail"],
   "detail": {
     "eventSource": ["s3.amazonaws.com"],
-    "eventName": ["GetObject", "HeadObject"],
+    "eventName": ["GetObject"],
     "requestParameters": {
       "key": ["flows/admin-credentials-backup.json"]
     }

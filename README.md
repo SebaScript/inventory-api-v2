@@ -157,8 +157,9 @@ two emulated techniques detected (100 %).
   Implemented as experiment 1's defence: ITDR detection of the node role used from outside the VPC
   endpoint (D3-RAPA), a Zero-Trust bucket boundary (D3-NI), and session revocation (D3-CR).
 - **Deception / honeytoken** — a decoy `flows/admin-credentials-backup.json` with an EventBridge
-  rule on its read (D3-DO). Any access is an alert almost without false positives; verified firing
-  in round 1 while every legitimate request stayed silent.
+  rule on reading it (`GetObject`, D3-DO). Verified firing in round 1 while every legitimate request
+  stayed silent. `HeadObject` is left out: Terraform's own refresh issues one on every deploy, a
+  false positive measured and tuned away.
 
 The partner (GCP) adds the second pair's trend: the incident report structured to the EU Cyber
 Resilience Act (Regulation 2024/2847) 24 h / 72 h timeline, in force since 2026-09-11.
