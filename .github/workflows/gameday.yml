@@ -9,16 +9,16 @@ on:
   workflow_dispatch:
     inputs:
       step:
-        description: One act of the game day
+        description: Step
         type: choice
         options: [exp1-attack, exp1-contain, exp4-attack, exp4-restore]
         default: exp1-attack
       round:
-        description: 0 before the controls (v4.2.0), 1 after them (v4.3.0)
+        description: Round
         type: string
         default: "0"
       t0:
-        description: "exp1-contain / exp4-restore: ISO time of the matching attack, to measure MTTC / RTO. Empty = now"
+        description: T0 of the attack (exp1-contain only)
         type: string
         default: ""
 
