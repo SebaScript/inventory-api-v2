@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       experiment:
-        description: steady measures without a fault; the others inject one and test their hypothesis
+        description: Experiment
         type: choice
         options: [a-partner-latency, c-db-pool, steady]
         default: a-partner-latency
       round:
-        description: Label for the evidence, e.g. 0 before the improvement and 1 after it
+        description: Round
         type: string
         default: "0"
   # The chaos gate: Infrastructure calls this after every deploy that asks for it.
