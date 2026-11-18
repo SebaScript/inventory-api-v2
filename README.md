@@ -95,7 +95,7 @@ controls as they are (4.2.0); round 1 after the improvements (4.3.0).
 | --- | --- | --- | --- | --- |
 | 1 Machine identity | The node role's IMDSv2 credentials used from outside AWS against S3 | AWS | Nothing logs it at object level: MTTD = ∞, MTTC = ∞ | CloudTrail+EventBridge detection; VPC-endpoint bucket policy → `AccessDenied`; session revoke |
 | 4 Data resilience | Ransomware: `flows/` objects overwritten and deleted | AWS runs, GCP analyses | No versioning: data gone, RPO/RTO = ∞ | Versioning + Object Lock; restore measures RTO; a delete rule |
-| 3 Telemetry & AI | Logging degraded + prompt injected into the AI triage assistant | GCP | — | Audit-log alert, heartbeat alert, data/instruction separation |
+| 3 Telemetry & AI | Alert policy disabled and a log exclusion added; a prompt injected into the Gemini assistant | GCP | No signal: MTTD = ∞, MTTC = ∞ | Audit-log tampering alert + restore script; heartbeat alert defined but not validated |
 
 **Detection as code.** Each rule is an EventBridge pattern in
 [`security/detections/`](security/detections/) with a positive event that must fire it and
@@ -147,8 +147,12 @@ writes, both from the runner. Telemetry is collected at CloudTrail → EventBrid
 `/security/alerts`, where MTTD and MTTC are measured against the attack's timestamp.
 
 **Rounds measured** (`gameday.yml`, two rounds, same method): exp 1 MTTD/MTTC ∞/∞ → **4 s / 61 s**;
-exp 4 RPO/RTO ∞/∞ → **1 s / 2 s**; **0 false positives** over both rounds. Detection coverage: the
-two emulated techniques detected (100 %).
+exp 4 RPO/RTO ∞/∞ → **1 s / 2 s**; **0 false positives** over both rounds. The partner's exp 3:
+telemetry MTTD/MTTC ∞/∞ → **54 s / 4 min 29 s**; the Gemini assistant ran no injected instruction
+in either round (refused in round 0, blocked by Google's safety filter on an escalated variant in
+round 1). The injection was direct, not through a field the assistant ingests: that is the next
+experiment. Detection coverage in round 1: the three emulated techniques detected (T1552.005/
+T1078.004, T1486/T1485 and T1562.008: 100 %).
 
 **Industry trends implemented (source + consulted 2026-11-16), not just mentioned.**
 
@@ -160,9 +164,6 @@ two emulated techniques detected (100 %).
   rule on reading it (`GetObject`, D3-DO). Verified firing in round 1 while every legitimate request
   stayed silent. `HeadObject` is left out: Terraform's own refresh issues one on every deploy, a
   false positive measured and tuned away.
-
-The partner (GCP) adds the second pair's trend: the incident report structured to the EU Cyber
-Resilience Act (Regulation 2024/2847) 24 h / 72 h timeline, in force since 2026-09-11.
 
 ### Expand / Contract
 
