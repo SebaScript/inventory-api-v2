@@ -13,13 +13,13 @@ en la misma petición, pide un registro a API B (`/interop/orders/random`), prop
 `x-correlation-id` y `traceparent`. API A devuelve siempre el item; el campo `partner.status`
 dice si llegó el registro de B (`ok`) o no (`unavailable`).
 
-**Perfil de carga fijo** (`chaos/slo.json`), idéntico en todas las corridas: 30 s de rampa hasta
+**Perfil de carga fijo** (`chaos/slo.json`), idéntico en todas las runs: 30 s de rampa hasta
 20 peticiones/s, 150 s de meseta y 15 s de bajada (unas 3 450 peticiones); la mitad son el flujo y
 la otra mitad lecturas simples (`GET /items/:id`, que no llaman a B).
 
-**Estado estable medido** con tres corridas sin fallo (workflow `Chaos`, `experiment=steady`):
+**Estado estable medido** con tres runs sin fallo (workflow `Chaos`, `experiment=steady`):
 
-| Corrida | p95 del flujo | p95 de lectura | `partner ok` | Peticiones fallidas |
+| run | p95 del flujo | p95 de lectura | `partner ok` | Peticiones fallidas |
 |---|---|---|---|---|
 | s1 (run 43780002984) | 126 ms | 72 ms | 100 % | 0 % |
 | s2 (run 43788999130) | 71 ms | 22 ms | 100 % | 0 % |
