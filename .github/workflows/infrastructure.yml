@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: apply deploys the infrastructure and the API; destroy removes everything
+        description: Action
         type: choice
         options: [apply, destroy]
         default: apply
       chaos_gate:
-        description: apply only. Run chaos experiment (a) after deploying; the pipeline fails if the flow loses its p95
+        description: Run the chaos gate after apply
         type: boolean
         default: true
 
