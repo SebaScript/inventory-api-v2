@@ -97,7 +97,7 @@ Se descartaron los **reintentos con backoff** para la llamada a B: con B lento, 
 multiplica su carga (tormenta de reintentos) y alarga la espera. Todos los patrones tienen tests
 (102 en verde).
 
-## 5. Ronda 1: mismo perfil, mismo fallo, misma duración, mismo instrumento
+## 5. Ronda 1: sistema con las mejoras aplicadas (mismo fallo y misma carga que la ronda 0)
 
 | Experimento | Run | Métrica objetivo | Ronda 0 | Ronda 1 | Variación | Hipótesis |
 |---|---|---|---|---|---|---|
