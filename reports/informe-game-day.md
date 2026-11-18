@@ -250,7 +250,7 @@ regla que salta en cada despliegue acaba ignorada, y entonces tampoco se mira el
 
 ## 7. IA en la defensa (humano en el bucle) y tendencias
 
-**IA en la defensa.** Claude Code (API A) y el asistente de B reciben la evidencia del game day
+**IA en la defensa.** Claude Code (API A) recibe la evidencia del game day
 (alertas, CloudTrail, logs) y proponen agrupación, hipótesis de causa y cronología. Se contrasta
 con la telemetría real:
 
@@ -270,9 +270,6 @@ con la telemetría real:
 2. **Engaño / honeytoken (A).** Objeto señuelo `flows/admin-credentials-backup.json` + regla
    EventBridge sobre su `GetObject` (D3-DO, Decoy Object). Verificado disparando en la ronda 1 sin
    un solo falso positivo del tráfico legítimo.
-3. **Cyber Resilience Act (B).** El reporte del incidente simulado se estructura con los tiempos del
-   Reglamento (UE) 2024/2847 (aviso 24 h, notificación 72 h, vigente desde el 11-sep-2026),
-   contrastado con lo exigido en Colombia.
 
 ## 8. Lecciones aprendidas, riesgos residuales y próximos experimentos
 
@@ -317,6 +314,10 @@ con la telemetría real:
 - **La credencial usada desde dentro del nodo** (por el endpoint): hoy solo la vería el honeytoken;
   probar una regla por volumen o por prefijo inusual.
 - **Sustituir las claves estáticas del pipeline por OIDC** y repetir el exp 1 contra el pipeline.
+- **Inyección indirecta en el asistente de B** (exp 3): esconder la instrucción en un campo de una
+  orden que el asistente lea, aplicar la separación entre datos e instrucciones y repetir con la
+  misma orden. Probar también la alerta por ausencia de señal, que quedó sin validar.
+- **Copia aislada** de `flows/` (otra cuenta o la otra nube), además del Object Lock.
 
 ## 9. Uso de IA en el análisis
 
