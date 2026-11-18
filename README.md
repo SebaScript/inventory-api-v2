@@ -87,7 +87,7 @@ controls as they are (4.2.0); round 1 after the improvements (4.3.0).
 | Workload | Pods non-root, read-only disk, no capabilities | AWS | — | — (hardening) | Exists |
 | Data | S3 private and encrypted; RDS encrypted | AWS | Alert on `flows/` deletes | D3-DO (honeytoken) | No versioning → versioning + Object Lock (governance) |
 | Detection & response | CloudWatch logs and alarms | AWS | Alarm | D3-RAPA | No data-plane trail → CloudTrail S3 data events, EventBridge, `/security/alerts`, honeytoken |
-| Telemetry & AI (GCP) | Cloud Monitoring alerts, Gemini assistant | GCP | Alert | — | Partner adds audit-log alert, heartbeat alert, AI mitigations |
+| Telemetry & AI (GCP) | Cloud Monitoring alerts, Gemini assistant | GCP | Alert | D3-RAPA, D3-RC | Partner adds an audit-log tampering alert and a restore script; the assistant has no tools |
 
 **Experiments (two-person version: 1 mandatory + minimal 4, plus the partner's 3).**
 
@@ -113,8 +113,8 @@ rule from the same file. The game day runs as code in
 | 1 Stolen node credential | T1552.005 (credentials from the cloud metadata API), T1078.004 (valid cloud accounts), T1530 (data from cloud storage) | D3-RAPA Resource Access Pattern Analysis (the EventBridge rule); D3-NI Network Isolation (VPC endpoint + bucket policy); D3-CR Credential Revoking (session revoke) | A.5.17, A.8.2, A.8.15, A.8.16, A.8.22 |
 | 4 Ransomware on `flows/` | T1486 (data encrypted for impact), T1485 (data destruction) | — (recovery is continuity: versioning + Object Lock) | A.8.13 (backup), A.5.30 (ICT readiness for continuity) |
 | Honeytoken | — | D3-DO Decoy Object | A.8.16 |
-| 3 Telemetry (GCP) | T1562.008 (disable or modify cloud logs) | — (partner completes) | A.8.15, A.8.16 |
-| 3 AI injection (GCP) | ATLAS AML.T0051.001 (indirect LLM prompt injection) | — (partner completes) | — |
+| 3 Telemetry (GCP) | T1562.008 (disable or modify cloud logs) | D3-RAPA Resource Access Pattern Analysis (the audit-log alert); D3-RC Restore Configuration (the restore script) | A.8.15, A.8.16 |
+| 3 AI injection (GCP) | ATLAS AML.T0051.000 (direct LLM prompt injection); OWASP LLM01 (prompt injection) | D3-CF Content Filtering (proposed, not implemented) | — |
 
 ```mermaid
 flowchart TB
