@@ -28,6 +28,13 @@ la otra mitad lecturas simples (`GET /items/:id`, que no llaman a B).
 Los umbrales de las hipótesis quedan por encima del peor valor medido y por debajo de lo que un
 usuario percibe como lento: 500 ms para el flujo, 300 ms para las lecturas y 99 % de `partner ok`.
 
+**Traza que cruza las dos nubes:** traceId `34df0716fbcea70db4f606f7d2fc4b3b` (Grafana Cloud →
+Explore → Tempo): 2 servicios y 24 tramos, 17 de `inventory-api` (AWS, us-east-1) y 7 de
+`orders-api` (Cloud Run, us-central1), entre ellos sus 2 consultas a PostgreSQL. El tramo de
+entrada de B (13 ms) cae dentro del tramo HTTP cliente de A (51 ms). Su padre directo es un tramo
+intermedio que no llega a Tempo (probablemente el frontal de Cloud Run): Tempo muestra las dos
+partes en la misma traza, pero no las une con una flecha de padre a hijo.
+
 ## 2. Experimentos
 
 | | (a) Latencia hacia API B | (c) Pool de conexiones agotado | (b) BD de API B inalcanzable |
